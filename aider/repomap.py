@@ -3,8 +3,8 @@ import os
 import random
 import sys
 import warnings
-from collections import Counter, defaultdict, namedtuple
-from importlib import resources
+from collections import Counter, defaultdict
+
 from pathlib import Path
 
 import networkx as nx
@@ -15,13 +15,13 @@ from pygments.token import Token
 from pygments.util import ClassNotFound
 from tqdm import tqdm
 
+from aider.parse import Tag, tree_to_tags, refs_from_lexer, get_query  # noqa: F402
+
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
 from tree_sitter_languages import get_language, get_parser  # noqa: E402
 
 from aider.dump import dump  # noqa: F402,E402
-
-Tag = namedtuple("Tag", "rel_fname fname line name kind".split())
 
 
 class RepoMap:
@@ -143,7 +143,7 @@ class RepoMap:
 
         # miss!
 
-        data = list(self.get_tags_raw(fname, rel_fname))
+        data = self.get_tags_raw(fname, rel_fname)
 
         # Update the cache
         self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
@@ -153,80 +153,30 @@ class RepoMap:
     def get_tags_raw(self, fname, rel_fname):
         lang = filename_to_lang(fname)
         if not lang:
-            return
+            return []
 
-        language = get_language(lang)
         parser = get_parser(lang)
-
-        # Load the tags queries
-        try:
-            scm_fname = resources.files(__package__).joinpath(
-                "queries", f"tree-sitter-{lang}-tags.scm"
-            )
-        except KeyError:
-            return
-        query_scm = scm_fname
-        if not query_scm.exists():
-            return
-        query_scm = query_scm.read_text()
 
         code = self.io.read_text(fname)
         if not code:
-            return
+            return []
+
         tree = parser.parse(bytes(code, "utf-8"))
+        query = get_query(lang)
+        if not query:
+            return []
 
-        # Run the tags queries
-        query = language.query(query_scm)
-        captures = query.captures(tree.root_node)
+        pre_tags = tree_to_tags(tree, query, rel_fname, fname)
 
-        captures = list(captures)
-
-        saw = set()
-        for node, tag in captures:
-            if tag.startswith("name.definition."):
-                kind = "def"
-            elif tag.startswith("name.reference."):
-                kind = "ref"
-            else:
-                continue
-
-            saw.add(kind)
-
-            result = Tag(
-                rel_fname=rel_fname,
-                fname=fname,
-                name=node.text.decode("utf-8"),
-                kind=kind,
-                line=node.start_point[0],
-            )
-
-            yield result
-
-        if "ref" in saw:
-            return
-        if "def" not in saw:
-            return
+        saw = set([tag.kind for tag in pre_tags])
+        if "ref" in saw or "def" not in saw:
+            return pre_tags
 
         # We saw defs, without any refs
         # Some tags files only provide defs (cpp, for example)
         # Use pygments to backfill refs
-
-        try:
-            lexer = guess_lexer_for_filename(fname, code)
-        except ClassNotFound:
-            return
-
-        tokens = list(lexer.get_tokens(code))
-        tokens = [token[1] for token in tokens if token[0] in Token.Name]
-
-        for token in tokens:
-            yield Tag(
-                rel_fname=rel_fname,
-                fname=fname,
-                name=token,
-                kind="ref",
-                line=-1,
-            )
+        refs = refs_from_lexer(rel_fname, fname, code)
+        return pre_tags + refs
 
     def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
         defines = defaultdict(set)
