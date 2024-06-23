@@ -12,7 +12,7 @@ def rank_tags(
     mentioned_idents: List[str],
     chat_fnames: List[str],
     other_rel_fnames: List[str],
-) -> List[Tag]:
+) -> List[tuple]:
     defines = defaultdict(set)
     references = defaultdict(list)
     definitions = defaultdict(set)
@@ -22,8 +22,7 @@ def rank_tags(
     for tag in tags:
         if tag.kind == "def":
             defines[tag.name].add(tag.rel_fname)
-            key = (tag.rel_fname, tag.name)
-            definitions[key].add(tag)
+            definitions[(tag.rel_fname, tag.name)].add(tag)
 
         if tag.kind == "ref":
             references[tag.name].append(tag.rel_fname)
@@ -92,6 +91,7 @@ def rank_tags(
 
     # dump(ranked_definitions)
 
+    # First rank the definitions
     for (fname, ident), rank in ranked_definitions:
         # print(f"{rank:.03f} {fname} {ident}")
         if fname in chat_rel_fnames:
@@ -102,10 +102,12 @@ def rank_tags(
 
     fnames_already_included = set(rt.rel_fname for rt in ranked_tags)
 
+    # Then go through the __files__ ranked earlier, and add
     top_rank = sorted([(rank, node) for (node, rank) in ranked.items()], reverse=True)
     for rank, fname in top_rank:
         if fname in rel_other_fnames_without_tags:
             rel_other_fnames_without_tags.remove(fname)
+        # At the very tail of the list, append the files that are not yet included with any ident
         if fname not in fnames_already_included:
             ranked_tags.append((fname,))
 
@@ -113,3 +115,47 @@ def rank_tags(
         ranked_tags.append((fname,))
 
     return ranked_tags
+
+
+def rank_tags_directly(
+    tags: List[Tag],
+    mentioned_fnames: List[str],
+    mentioned_idents: List[str],
+    chat_fnames: List[str],
+    other_rel_fnames: List[str],
+) -> List[Tag]:
+    pass
+
+
+def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:
+    def_map = defaultdict(set)
+    for tag in tags:
+        if tag.kind == "def":
+            def_map[tag.name].add(tag)
+
+    G = nx.MultiDiGraph()
+    # Add all tags as nodes
+    # Add edges from references to definitions
+    for tag in tags:
+        if tag.kind == "def":
+            G.add_node(tag, kind=tag.kind)
+        elif tag.kind == "ref":
+            G.add_node(tag, kind=tag.kind)
+            if tag.name in def_map:
+                for def_tag in def_map[tag.name]:
+                    G.add_edge(tag, def_tag)
+        # Build up definition hierarchy
+        # A parent definition for a tag must:
+        # - be in the same file
+        # - Have matching tail of parent names
+        if len(tag.parent_names):
+            parent_name = tag.parent_names[-1]
+            candidates = [
+                c
+                for c in def_map[parent_name]
+                if c.fname == tag.fname and c.parent_names == tag.parent_names[:-1]
+            ]
+            for c in candidates:
+                G.add_edge(c, tag)
+
+    return G

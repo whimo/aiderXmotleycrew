@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 
 from aider.parse import Tag, tree_to_tags, refs_from_lexer, get_query  # noqa: F402
-from aider.graph import rank_tags  # noqa: F402
+from aider.graph import rank_tags, rank_tags_directly  # noqa: F402
 
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
@@ -213,6 +213,9 @@ class RepoMap:
 
         # this constructs the graph and ranks the tags based on it
         other_rel_fnames = [self.get_rel_fname(fname) for fname in other_fnames]
+        reranked_tags = rank_tags_directly(
+            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+        )
         ranked_tags = rank_tags(
             tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
         )
@@ -269,7 +272,7 @@ class RepoMap:
 
         return best_tree
 
-    tree_cache = dict()
+    # tree_cache = dict()
 
     def render_tree(self, abs_fname, rel_fname, lois):
         key = (rel_fname, tuple(sorted(lois)))
