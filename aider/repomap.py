@@ -295,7 +295,7 @@ class RepoMap:
 
         rel_other_fnames_without_tags = set(self.get_rel_fname(fname) for fname in other_fnames)
 
-        fnames_already_included = set(rt[0] for rt in ranked_tags)
+        fnames_already_included = set(rt.rel_fname for rt in ranked_tags)
 
         top_rank = sorted([(rank, node) for (node, rank) in ranked.items()], reverse=True)
         for rank, fname in top_rank:
@@ -397,7 +397,7 @@ class RepoMap:
             return ""
 
         tags = [tag for tag in tags if tag[0] not in chat_rel_fnames]
-        tags = sorted(tags)
+        tags = sorted(tags, key=lambda x: tuple(x))
 
         cur_fname = None
         cur_abs_fname = None
