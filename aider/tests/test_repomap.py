@@ -4,7 +4,7 @@ import unittest
 from aider.dump import dump  # noqa: F401
 from aider.io import InputOutput
 from aider.models import Model
-from aider.repomap import RepoMap
+from aider.codemap.repomap import RepoMap
 from aider.utils import IgnorantTemporaryDirectory
 
 

@@ -3,7 +3,7 @@ from collections import defaultdict, Counter
 
 import networkx as nx
 
-from aider.parse import Tag
+from aider.codemap.parse import Tag
 
 
 def rank_tags(
@@ -62,9 +62,6 @@ def rank_tags(
                 #    continue
                 G.add_edge(referencer, definer, weight=mul * num_refs, ident=ident)
 
-    if not references:
-        pass
-
     if personalization:
         pers_args = dict(personalization=personalization, dangling=personalization)
     else:
@@ -91,7 +88,8 @@ def rank_tags(
 
     # dump(ranked_definitions)
 
-    # First rank the definitions
+    # First collect the definitions in rank order
+    # Do NOT include the chat-added files - is that because they'll be added in their entirety?
     for (fname, ident), rank in ranked_definitions:
         # print(f"{rank:.03f} {fname} {ident}")
         if fname in chat_rel_fnames:
@@ -102,15 +100,16 @@ def rank_tags(
 
     fnames_already_included = set(rt.rel_fname for rt in ranked_tags)
 
-    # Then go through the __files__ ranked earlier, and add
+    # Then go through the __files__ ranked earlier, and add them in rank order
+    # These are just files with references, without definitions, presumably
     top_rank = sorted([(rank, node) for (node, rank) in ranked.items()], reverse=True)
     for rank, fname in top_rank:
         if fname in rel_other_fnames_without_tags:
             rel_other_fnames_without_tags.remove(fname)
-        # At the very tail of the list, append the files that are not yet included with any ident
         if fname not in fnames_already_included:
             ranked_tags.append((fname,))
 
+    # At the very tail of the list, append the files that have no tags at all
     for fname in rel_other_fnames_without_tags:
         ranked_tags.append((fname,))
 
@@ -124,7 +123,10 @@ def rank_tags_directly(
     chat_fnames: List[str],
     other_rel_fnames: List[str],
 ) -> List[Tag]:
-    pass
+    graph = build_tag_graph(tags)
+
+    # overweight mentioned indents: defs and refs?
+    # overweight chat files and mentioned files?
 
 
 def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:

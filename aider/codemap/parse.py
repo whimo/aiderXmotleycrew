@@ -1,13 +1,15 @@
-from collections import namedtuple
-from typing import List, Set
+from typing import List
+import os
 from importlib import resources
-from functools import total_ordering
 
 from pygments.lexers import guess_lexer_for_filename
 from pygments.token import Token
 from pygments.util import ClassNotFound
 from tree_sitter import Tree, Query, Node
 from tree_sitter_languages import get_language
+from grep_ast import filename_to_lang
+from tree_sitter_languages import get_parser  # noqa: E402
+
 import logging
 
 from dataclasses import dataclass
@@ -16,10 +18,10 @@ from dataclasses import dataclass
 @dataclass
 class Tag:
     rel_fname: str
-    fname: str
     line: int
     name: str
     kind: str
+    fname: str
     parent_names: tuple[str] = ()
 
     @property
@@ -30,7 +32,7 @@ class Tag:
             return tuple(list(self.parent_names) + [self.name])
 
     def to_tuple(self):
-        return (self.rel_fname, self.fname, self.line, self.name, self.kind, self.parent_names)
+        return (self.rel_fname, self.line, self.name, self.kind, self.fname, self.parent_names)
 
     def __getitem__(self, item):
         return self.to_tuple()[item]
@@ -45,14 +47,13 @@ class Tag:
 def get_query(lang: str) -> Query | None:
     language = get_language(lang)
     # Load the tags queries
-    try:
-        scm_fname = resources.files(__package__).joinpath("queries", f"tree-sitter-{lang}-tags.scm")
-    except KeyError:
+    here = os.path.dirname(__file__)
+    scm_fname = os.path.realpath(os.path.join(here, "../queries", f"tree-sitter-{lang}-tags.scm"))
+    if not os.path.exists(scm_fname):
         return None
-    query_scm = scm_fname
-    if not query_scm.exists():
-        return None
-    query_scm = query_scm.read_text()
+
+    with open(scm_fname, "r") as file:
+        query_scm = file.read()
 
     # Run the tags queries
     query = language.query(query_scm)
@@ -60,7 +61,7 @@ def get_query(lang: str) -> Query | None:
 
 
 def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[Tag]:
-
+    # TODO: extract docstrings and comments to do RAG on
     captures = list(query.captures(tree.root_node))
     defs = []
     refs = []
@@ -76,11 +77,8 @@ def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[T
         else:
             continue
 
-    out_nodes = defs + refs
-
-    tmp = []
     out = []
-    for node, kind in out_nodes:
+    for node, kind in defs + refs:
         name_node = node2namenode(node, names)
         if name_node is None:
             continue
@@ -156,3 +154,31 @@ def refs_from_lexer(rel_fname, fname, code):
         for token in tokens
     ]
     return out
+
+
+def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
+    lang = filename_to_lang(fname)
+    if not lang:
+        return []
+
+    parser = get_parser(lang)
+
+    if not code:
+        return []
+
+    tree = parser.parse(bytes(code, "utf-8"))
+    query = get_query(lang)
+    if not query:
+        return []
+
+    pre_tags = tree_to_tags(tree, query, rel_fname, fname)
+
+    saw = set([tag.kind for tag in pre_tags])
+    if "ref" in saw or "def" not in saw:
+        return pre_tags
+
+    # We saw defs, without any refs
+    # Some tags files only provide defs (cpp, for example)
+    # Use pygments to backfill refs
+    refs = refs_from_lexer(rel_fname, fname, code)
+    return pre_tags + refs

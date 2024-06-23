@@ -3,27 +3,21 @@ import os
 import random
 import sys
 import warnings
-from collections import Counter, defaultdict
+from typing import List
 
 from pathlib import Path
 
-import networkx as nx
 from diskcache import Cache
-from grep_ast import TreeContext, filename_to_lang
-from pygments.lexers import guess_lexer_for_filename
-from pygments.token import Token
-from pygments.util import ClassNotFound
+from grep_ast import TreeContext
 from tqdm import tqdm
 
 
-from aider.parse import Tag, tree_to_tags, refs_from_lexer, get_query  # noqa: F402
-from aider.graph import rank_tags, rank_tags_directly  # noqa: F402
+from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
+from aider.codemap.graph import rank_tags, rank_tags_directly  # noqa: F402
+from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
-from tree_sitter_languages import get_language, get_parser  # noqa: E402
-
-from aider.dump import dump  # noqa: F402,E402
 
 
 class RepoMap:
@@ -69,13 +63,11 @@ class RepoMap:
         if not mentioned_idents:
             mentioned_idents = set()
 
-        max_map_tokens = self.max_map_tokens
-
         # With no files in the chat, give a bigger view of the entire repo
         MUL = 16
         padding = 4096
-        if max_map_tokens and self.max_context_window:
-            target = min(max_map_tokens * MUL, self.max_context_window - padding)
+        if self.max_map_tokens and self.max_context_window:
+            target = min(self.max_map_tokens * MUL, self.max_context_window - padding)
         else:
             target = 0
         if not chat_files and self.max_context_window and target > 0:
@@ -83,7 +75,7 @@ class RepoMap:
 
         try:
             files_listing = self.get_ranked_tags_map(
-                chat_files, other_files, max_map_tokens, mentioned_fnames, mentioned_idents
+                chat_files, other_files, self.max_map_tokens, mentioned_fnames, mentioned_idents
             )
         except RecursionError:
             self.io.tool_error("Disabling repo map, git repo too large?")
@@ -145,8 +137,8 @@ class RepoMap:
             return self.TAGS_CACHE[cache_key]["data"]
 
         # miss!
-
-        data = self.get_tags_raw(fname, rel_fname)
+        code = self.io.read_text(fname)
+        data = get_tags_raw(fname, rel_fname, code)
         assert isinstance(data, list)
 
         # Update the cache
@@ -154,38 +146,19 @@ class RepoMap:
         self.save_tags_cache()
         return data
 
-    def get_tags_raw(self, fname, rel_fname) -> list[Tag]:
-        lang = filename_to_lang(fname)
-        if not lang:
-            return []
-
-        parser = get_parser(lang)
-
-        code = self.io.read_text(fname)
-        if not code:
-            return []
-
-        tree = parser.parse(bytes(code, "utf-8"))
-        query = get_query(lang)
-        if not query:
-            return []
-
-        pre_tags = tree_to_tags(tree, query, rel_fname, fname)
-
-        saw = set([tag.kind for tag in pre_tags])
-        if "ref" in saw or "def" not in saw:
-            return pre_tags
-
-        # We saw defs, without any refs
-        # Some tags files only provide defs (cpp, for example)
-        # Use pygments to backfill refs
-        refs = refs_from_lexer(rel_fname, fname, code)
-        return pre_tags + refs
-
     def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
 
         # Check file names for validity
         fnames = sorted(set(chat_fnames).union(set(other_fnames)))
+
+        # Do better filename matching
+        clean_mentioned_filenames = []
+        for name in mentioned_fnames:
+            for fname in fnames:
+                if name in fname:
+                    clean_mentioned_filenames.append(fname)
+                    break
+        mentioned_fnames = clean_mentioned_filenames
 
         # What does that do?
         if self.cache_missing:
@@ -229,6 +202,16 @@ class RepoMap:
         mentioned_fnames=None,
         mentioned_idents=None,
     ):
+        """
+        Does a binary search over the number of tags to include in the map,
+        to find the largest map that fits within the token limit.
+        :param chat_fnames:
+        :param other_fnames:
+        :param max_map_tokens:
+        :param mentioned_fnames:
+        :param mentioned_idents:
+        :return:
+        """
         if not other_fnames:
             other_fnames = list()
         if not max_map_tokens:
@@ -304,7 +287,7 @@ class RepoMap:
         self.tree_cache[key] = res
         return res
 
-    def to_tree(self, tags, chat_rel_fnames):
+    def to_tree(self, tags: List[Tag | tuple], chat_rel_fnames):
         if not tags:
             return ""
 

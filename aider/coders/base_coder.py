@@ -25,7 +25,7 @@ from aider.linter import Linter
 from aider.litellm import litellm
 from aider.mdstream import MarkdownStream
 from aider.repo import GitRepo
-from aider.repomap import RepoMap
+from aider.codemap.repomap import RepoMap
 from aider.sendchat import send_with_retries
 from aider.utils import format_content, format_messages, is_image_file
 
