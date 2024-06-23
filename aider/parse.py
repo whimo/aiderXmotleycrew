@@ -61,10 +61,7 @@ def get_query(lang: str) -> Query | None:
 
 def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[Tag]:
 
-    captures = query.captures(tree.root_node)
-
-    captures = list(captures)
-
+    captures = list(query.captures(tree.root_node))
     defs = []
     refs = []
     names = []
