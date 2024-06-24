@@ -28,7 +28,6 @@ from aider.repo import GitRepo
 from aider.repomap import RepoMap
 from aider.sendchat import send_with_retries
 from aider.utils import format_content, format_messages, is_image_file
-
 from ..dump import dump  # noqa: F401
 
 
@@ -74,13 +73,15 @@ class Coder:
         edit_format=None,
         io=None,
         from_coder=None,
+        use_motleycrew=False,
         **kwargs,
     ):
         from . import (
-            EditBlockCoder,
             EditBlockFencedCoder,
             UnifiedDiffCoder,
             WholeFileCoder,
+            EditBlockCoder,
+            MotleyCrewCoder,
         )
 
         if not main_model:
@@ -121,7 +122,9 @@ class Coder:
 
             kwargs = use_kwargs
 
-        if edit_format == "diff":
+        if use_motleycrew:
+            res = MotleyCrewCoder(main_model, io, **kwargs)
+        elif edit_format == "diff":
             res = EditBlockCoder(main_model, io, **kwargs)
         elif edit_format == "diff-fenced":
             res = EditBlockFencedCoder(main_model, io, **kwargs)
