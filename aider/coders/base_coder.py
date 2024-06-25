@@ -73,7 +73,6 @@ class Coder:
         edit_format=None,
         io=None,
         from_coder=None,
-        use_motleycrew=False,
         **kwargs,
     ):
         from . import (
@@ -81,7 +80,6 @@ class Coder:
             UnifiedDiffCoder,
             WholeFileCoder,
             EditBlockCoder,
-            MotleyCrewCoder,
         )
 
         if not main_model:
@@ -122,9 +120,7 @@ class Coder:
 
             kwargs = use_kwargs
 
-        if use_motleycrew:
-            res = MotleyCrewCoder(main_model, io, **kwargs)
-        elif edit_format == "diff":
+        if edit_format == "diff":
             res = EditBlockCoder(main_model, io, **kwargs)
         elif edit_format == "diff-fenced":
             res = EditBlockFencedCoder(main_model, io, **kwargs)

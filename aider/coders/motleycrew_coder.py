@@ -258,7 +258,8 @@ class CoderOutputHandler(MotleyOutputHandler):
     _name = RETURN_TO_USER_TOOL_NAME
     _description = (
         "Call this tool when you have finished your edits "
-        "OR when you need to ask the user a question."
+        "OR when you need to ask the user a question. "
+        "ONLY COMMUNICATE WITH THE USER THROUGH THIS TOOL. Direct messages will be ignored."
     )
     _args_schema = CoderOutputHandlerInput
 
@@ -363,9 +364,7 @@ class CoderAgent(LangchainMotleyAgent):
             agent = (
                 RunnableLambda(print_passthrough)
                 | RunnableLambda(fill_prompt)
-                | RunnableLambda(print_passthrough)
                 | llm_with_tools
-                | RunnableLambda(print_passthrough)
                 | ToolsAgentOutputParser()
             )
 
