@@ -3,25 +3,21 @@ import os
 import random
 import sys
 import warnings
-from collections import Counter, defaultdict, namedtuple
-from importlib import resources
+from typing import List
+
 from pathlib import Path
 
-import networkx as nx
 from diskcache import Cache
-from grep_ast import TreeContext, filename_to_lang
-from pygments.lexers import guess_lexer_for_filename
-from pygments.token import Token
-from pygments.util import ClassNotFound
+from grep_ast import TreeContext
 from tqdm import tqdm
+
+
+from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
+from aider.codemap.graph import rank_tags, rank_tags_directly  # noqa: F402
+from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
-from tree_sitter_languages import get_language, get_parser  # noqa: E402
-
-from aider.dump import dump  # noqa: F402,E402
-
-Tag = namedtuple("Tag", "rel_fname fname line name kind".split())
 
 
 class RepoMap:
@@ -67,13 +63,11 @@ class RepoMap:
         if not mentioned_idents:
             mentioned_idents = set()
 
-        max_map_tokens = self.max_map_tokens
-
         # With no files in the chat, give a bigger view of the entire repo
         MUL = 16
         padding = 4096
-        if max_map_tokens and self.max_context_window:
-            target = min(max_map_tokens * MUL, self.max_context_window - padding)
+        if self.max_map_tokens and self.max_context_window:
+            target = min(self.max_map_tokens * MUL, self.max_context_window - padding)
         else:
             target = 0
         if not chat_files and self.max_context_window and target > 0:
@@ -81,7 +75,7 @@ class RepoMap:
 
         try:
             files_listing = self.get_ranked_tags_map(
-                chat_files, other_files, max_map_tokens, mentioned_fnames, mentioned_idents
+                chat_files, other_files, self.max_map_tokens, mentioned_fnames, mentioned_idents
             )
         except RecursionError:
             self.io.tool_error("Disabling repo map, git repo too large?")
@@ -133,6 +127,7 @@ class RepoMap:
 
     def get_tags(self, fname, rel_fname):
         # Check if the file is in the cache and if the modification time has not changed
+        # TODO: this should be a decorator?
         file_mtime = self.get_mtime(fname)
         if file_mtime is None:
             return []
@@ -142,112 +137,35 @@ class RepoMap:
             return self.TAGS_CACHE[cache_key]["data"]
 
         # miss!
-
-        data = list(self.get_tags_raw(fname, rel_fname))
+        code = self.io.read_text(fname)
+        data = get_tags_raw(fname, rel_fname, code)
+        assert isinstance(data, list)
 
         # Update the cache
         self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
         self.save_tags_cache()
         return data
 
-    def get_tags_raw(self, fname, rel_fname):
-        lang = filename_to_lang(fname)
-        if not lang:
-            return
-
-        language = get_language(lang)
-        parser = get_parser(lang)
-
-        # Load the tags queries
-        try:
-            scm_fname = resources.files(__package__).joinpath(
-                "queries", f"tree-sitter-{lang}-tags.scm"
-            )
-        except KeyError:
-            return
-        query_scm = scm_fname
-        if not query_scm.exists():
-            return
-        query_scm = query_scm.read_text()
-
-        code = self.io.read_text(fname)
-        if not code:
-            return
-        tree = parser.parse(bytes(code, "utf-8"))
-
-        # Run the tags queries
-        query = language.query(query_scm)
-        captures = query.captures(tree.root_node)
-
-        captures = list(captures)
-
-        saw = set()
-        for node, tag in captures:
-            if tag.startswith("name.definition."):
-                kind = "def"
-            elif tag.startswith("name.reference."):
-                kind = "ref"
-            else:
-                continue
-
-            saw.add(kind)
-
-            result = Tag(
-                rel_fname=rel_fname,
-                fname=fname,
-                name=node.text.decode("utf-8"),
-                kind=kind,
-                line=node.start_point[0],
-            )
-
-            yield result
-
-        if "ref" in saw:
-            return
-        if "def" not in saw:
-            return
-
-        # We saw defs, without any refs
-        # Some tags files only provide defs (cpp, for example)
-        # Use pygments to backfill refs
-
-        try:
-            lexer = guess_lexer_for_filename(fname, code)
-        except ClassNotFound:
-            return
-
-        tokens = list(lexer.get_tokens(code))
-        tokens = [token[1] for token in tokens if token[0] in Token.Name]
-
-        for token in tokens:
-            yield Tag(
-                rel_fname=rel_fname,
-                fname=fname,
-                name=token,
-                kind="ref",
-                line=-1,
-            )
-
     def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
-        defines = defaultdict(set)
-        references = defaultdict(list)
-        definitions = defaultdict(set)
 
-        personalization = dict()
+        # Check file names for validity
+        fnames = sorted(set(chat_fnames).union(set(other_fnames)))
 
-        fnames = set(chat_fnames).union(set(other_fnames))
-        chat_rel_fnames = set()
+        # Do better filename matching
+        clean_mentioned_filenames = []
+        for name in mentioned_fnames:
+            for fname in fnames:
+                if name in fname:
+                    clean_mentioned_filenames.append(fname)
+                    break
+        mentioned_fnames = clean_mentioned_filenames
 
-        fnames = sorted(fnames)
-
-        # Default personalization for unspecified files is 1/num_nodes
-        # https://networkx.org/documentation/stable/_modules/networkx/algorithms/link_analysis/pagerank_alg.html#pagerank
-        personalize = 10 / len(fnames)
-
+        # What does that do?
         if self.cache_missing:
             fnames = tqdm(fnames)
         self.cache_missing = False
 
+        cleaned_fnames = []
         for fname in fnames:
             if not Path(fname).is_file():
                 if fname not in self.warned_files:
@@ -260,103 +178,20 @@ class RepoMap:
 
                 self.warned_files.add(fname)
                 continue
-
-            # dump(fname)
             rel_fname = self.get_rel_fname(fname)
+            cleaned_fnames.append((fname, rel_fname))
 
-            if fname in chat_fnames:
-                personalization[rel_fname] = personalize
-                chat_rel_fnames.add(rel_fname)
+        # All the source code parsing happens here
+        tags = sum([self.get_tags(fname, rel_fname) for fname, rel_fname in cleaned_fnames], [])
 
-            if fname in mentioned_fnames:
-                personalization[rel_fname] = personalize
-
-            tags = list(self.get_tags(fname, rel_fname))
-            if tags is None:
-                continue
-
-            for tag in tags:
-                if tag.kind == "def":
-                    defines[tag.name].add(rel_fname)
-                    key = (rel_fname, tag.name)
-                    definitions[key].add(tag)
-
-                if tag.kind == "ref":
-                    references[tag.name].append(rel_fname)
-
-        ##
-        # dump(defines)
-        # dump(references)
-        # dump(personalization)
-
-        if not references:
-            references = dict((k, list(v)) for k, v in defines.items())
-
-        idents = set(defines.keys()).intersection(set(references.keys()))
-
-        G = nx.MultiDiGraph()
-
-        for ident in idents:
-            definers = defines[ident]
-            if ident in mentioned_idents:
-                mul = 10
-            else:
-                mul = 1
-            for referencer, num_refs in Counter(references[ident]).items():
-                for definer in definers:
-                    # if referencer == definer:
-                    #    continue
-                    G.add_edge(referencer, definer, weight=mul * num_refs, ident=ident)
-
-        if not references:
-            pass
-
-        if personalization:
-            pers_args = dict(personalization=personalization, dangling=personalization)
-        else:
-            pers_args = dict()
-
-        try:
-            ranked = nx.pagerank(G, weight="weight", **pers_args)
-        except ZeroDivisionError:
-            return []
-
-        # distribute the rank from each source node, across all of its out edges
-        ranked_definitions = defaultdict(float)
-        for src in G.nodes:
-            src_rank = ranked[src]
-            total_weight = sum(data["weight"] for _src, _dst, data in G.out_edges(src, data=True))
-            # dump(src, src_rank, total_weight)
-            for _src, dst, data in G.out_edges(src, data=True):
-                data["rank"] = src_rank * data["weight"] / total_weight
-                ident = data["ident"]
-                ranked_definitions[(dst, ident)] += data["rank"]
-
-        ranked_tags = []
-        ranked_definitions = sorted(ranked_definitions.items(), reverse=True, key=lambda x: x[1])
-
-        # dump(ranked_definitions)
-
-        for (fname, ident), rank in ranked_definitions:
-            # print(f"{rank:.03f} {fname} {ident}")
-            if fname in chat_rel_fnames:
-                continue
-            ranked_tags += list(definitions.get((fname, ident), []))
-
-        rel_other_fnames_without_tags = set(self.get_rel_fname(fname) for fname in other_fnames)
-
-        fnames_already_included = set(rt[0] for rt in ranked_tags)
-
-        top_rank = sorted([(rank, node) for (node, rank) in ranked.items()], reverse=True)
-        for rank, fname in top_rank:
-            if fname in rel_other_fnames_without_tags:
-                rel_other_fnames_without_tags.remove(fname)
-            if fname not in fnames_already_included:
-                ranked_tags.append((fname,))
-
-        for fname in rel_other_fnames_without_tags:
-            ranked_tags.append((fname,))
-
+        # this constructs the graph and ranks the tags based on it
+        other_rel_fnames = [self.get_rel_fname(fname) for fname in other_fnames]
+        reranked_tags = rank_tags_directly(
+            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+        )
+        ranked_tags = rank_tags(
+            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+        )
         return ranked_tags
 
     def get_ranked_tags_map(
@@ -367,6 +202,16 @@ class RepoMap:
         mentioned_fnames=None,
         mentioned_idents=None,
     ):
+        """
+        Does a binary search over the number of tags to include in the map,
+        to find the largest map that fits within the token limit.
+        :param chat_fnames:
+        :param other_fnames:
+        :param max_map_tokens:
+        :param mentioned_fnames:
+        :param mentioned_idents:
+        :return:
+        """
         if not other_fnames:
             other_fnames = list()
         if not max_map_tokens:
@@ -410,7 +255,7 @@ class RepoMap:
 
         return best_tree
 
-    tree_cache = dict()
+    # tree_cache = dict()
 
     def render_tree(self, abs_fname, rel_fname, lois):
         key = (rel_fname, tuple(sorted(lois)))
@@ -442,12 +287,12 @@ class RepoMap:
         self.tree_cache[key] = res
         return res
 
-    def to_tree(self, tags, chat_rel_fnames):
+    def to_tree(self, tags: List[Tag | tuple], chat_rel_fnames):
         if not tags:
             return ""
 
         tags = [tag for tag in tags if tag[0] not in chat_rel_fnames]
-        tags = sorted(tags)
+        tags = sorted(tags, key=lambda x: tuple(x))
 
         cur_fname = None
         cur_abs_fname = None
