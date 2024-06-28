@@ -8,26 +8,41 @@ from .editblock_prompts import EditBlockPrompts
 
 
 class MotleyCrewPrompts(EditBlockPrompts):
+    files_no_full_files_with_repo_map = """Don't try and edit any existing code without asking me to add the files to the chat!
+Using the tool `add_files`, tell me which files in my repo are the most likely to **need changes** to solve the requests I make, and then stop so I can add them to the chat.
+Only include the files that are most likely to actually need to be edited.
+Don't include files that might contain relevant context, just files that will need to be changed.
+"""  # noqa: E501
+
+    repo_content_prefix = """Here are summaries of some files present in my git repository.
+Do not propose changes to these files, treat them as *read-only*.
+If you need to edit any of these files, ask me to *add them to the chat* first by calling `add_files`.
+"""
+
+    added_files = """I added these files to the chat: {fnames}.
+
+If you need to propose edits to other existing files not already added to the chat, you *MUST* tell the me their full path names and ask me to *add the files to the chat* by calling the tool `add_files`. End your reply and wait for my approval. You can keep asking if you then decide you need to edit more files."""
+
     main_system = SystemMessagePromptTemplate.from_template(
         """Act as an expert software developer.
 Always use best practices when coding.
 Respect and use existing conventions, libraries, etc that are already present in the code base.
 {lazy_prompt}
 Take requests for changes to the supplied code.
-If the request is ambiguous, ask questions using the tool `{return_to_user_tool_name}`.
+If the request is ambiguous, ask questions using the tool `return_to_user`.
 
 Always reply to the user in the same language they are using.
 
 Once you understand the request you MUST:
-1. Decide if you need to propose *SEARCH/REPLACE* edits to any files that haven't been added to the chat. You can create new files without asking. But if you need to propose edits to existing files not already added to the chat, you *MUST* call the tool `{add_files_tool_name}` with their full path names to ask the user to *add the files to the chat*. Make the tool call and wait for their approval. You can keep calling if you then decide you need to edit more files.
+1. Decide if you need to propose *SEARCH/REPLACE* edits to any files that haven't been added to the chat. You can create new files without asking. But if you need to propose edits to existing files not already added to the chat, you *MUST* call the tool `add_files` with their full path names to ask the user to *add the files to the chat*. Make the tool call and wait for their approval. You can keep calling if you then decide you need to edit more files.
 2. Think step-by-step and explain the needed changes with a numbered list of short sentences.
-3. Make the changes to the files by calling the tool `{file_edit_tool_name}` with the *SEARCH/REPLACE arguments* for each change. You can keep calling the tool with new *SEARCH/REPLACE arguments* until you have made all the necessary changes. ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `{file_edit_tool_name}` TOOL CALL!
-4. After making all the necessary changes, you MUST call the tool `{return_to_user_tool_name}` to apply the changes and to inform the user that you have finished. You can't call any tools after this step.
+3. Make the changes to the files by calling the tool `edit_file` with the *SEARCH/REPLACE arguments* for each change. You can keep calling the tool with new *SEARCH/REPLACE arguments* until you have made all the necessary changes. ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `edit_file` TOOL CALL!
+4. After making all the necessary changes, you MUST call the tool `return_to_user` to apply the changes and to inform the user that you have finished. You can't call any tools after this step.
 
 You have access to the following tools:
 {tools}
 
-All changes to files must be made using the `{file_edit_tool_name}` tool.
+All changes to files must be made using the `edit_file` tool.
 """
     )
 
@@ -59,7 +74,7 @@ from flask import Flask
 """,
                                 )
                             ),
-                            "name": "file_edit_tool",
+                            "name": "edit_file",
                         },
                         "type": "function",
                     },
@@ -83,7 +98,7 @@ from flask import Flask
                                     replace="",
                                 )
                             ),
-                            "name": "file_edit_tool",
+                            "name": "edit_file",
                         },
                         "type": "function",
                     },
@@ -101,7 +116,7 @@ from flask import Flask
 """,
                                 )
                             ),
-                            "name": "file_edit_tool",
+                            "name": "edit_file",
                         },
                         "type": "function",
                     },
@@ -126,7 +141,7 @@ I can now apply the changes to the code base.
 """,
             tool_calls=[
                 ToolCall(
-                    name="return_to_user_tool",
+                    name="return_to_user",
                     args=dict(),
                     id="call_fkr8403nFUv73kc9mN547IVm",
                 ),
@@ -145,6 +160,26 @@ I can now apply the changes to the code base.
                 "tool_calls": [
                     {
                         "index": 0,
+                        "id": "call_4lOYq2sR4ZCb22p2xUuq5igP",
+                        "function": {
+                            "arguments": json.dumps(dict(files=["hello.py"])),
+                            "name": "add_files",
+                        },
+                        "type": "function",
+                    },
+                ]
+            },
+        ),
+        ToolMessage(
+            content=added_files.format(fnames=["hello.py"]),
+            tool_call_id="call_4lOYq2sR4ZCb22p2xUuq5igP",
+        ),
+        AIMessage(
+            content="",
+            additional_kwargs={
+                "tool_calls": [
+                    {
+                        "index": 0,
                         "id": "call_ld94UGfj3fkJn85KEk8vjDoK",
                         "function": {
                             "arguments": json.dumps(
@@ -153,13 +188,13 @@ I can now apply the changes to the code base.
                                     language="python",
                                     search="",
                                     replace="""def hello():
-    '''print a greeting'''
+        '''print a greeting'''
 
-    print("hello")
-""",
+        print("hello")
+    """,
                                 )
                             ),
-                            "name": "file_edit_tool",
+                            "name": "edit_file",
                         },
                         "type": "function",
                     },
@@ -172,15 +207,15 @@ I can now apply the changes to the code base.
                                     file_path="main.py",
                                     language="python",
                                     search="""def hello():
-    '''print a greeting'''
+        '''print a greeting'''
 
-    print("hello")
-""",
+        print("hello")
+    """,
                                     replace="""from hello import hello
-""",
+    """,
                                 )
                             ),
-                            "name": "file_edit_tool",
+                            "name": "edit_file",
                         },
                         "type": "function",
                     },
@@ -195,7 +230,7 @@ I can now apply the changes to the code base.
 """,
             tool_calls=[
                 ToolCall(
-                    name="return_to_user_tool",
+                    name="return_to_user",
                     args=dict(),
                     id="call_7TmRhiBSX5ud8DW1RyZSEcDf",
                 ),
@@ -204,30 +239,30 @@ I can now apply the changes to the code base.
     ]
 
     system_reminder = SystemMessagePromptTemplate.from_template(
-        """# *`{file_edit_tool_name}`* tool call Rules:
+        """# `edit_file` tool call Rules:
 
 Every *SEARCH* argument must *EXACTLY MATCH* the existing source code, character for character, including all comments, docstrings, etc.
 
-`{file_edit_tool_name}` tool will replace *all* matching occurrences.
+`edit_file` tool will replace *all* matching occurrences.
 Include enough lines to make the SEARCH blocks unique.
 
 Include *ALL* the code being searched and replaced!
 
-Only call `{file_edit_tool_name}` for files that the user has added to the chat!
+Only call `edit_file` for files that the user has added to the chat!
 
-To move code within a file, use 2 `{file_edit_tool_name}` calls: 1 to delete it from its current location, 1 to insert it in the new location.
+To move code within a file, use 2 `edit_file` calls: 1 to delete it from its current location, 1 to insert it in the new location.
 
-If you want to put code in a new file, call the `{file_edit_tool_name}` tool with:
+If you want to put code in a new file, call the `edit_file` tool with:
 - A new file path, including dir name if needed
 - An empty `SEARCH` argument
 - The new file's contents in the `REPLACE` argument
 
 {lazy_prompt}
-ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `{file_edit_tool_name}` TOOL CALL!
+ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `edit_file` TOOL CALL!
 
 You have access to the following tools:
 {tools}
 
-All changes to files must be made using the `{file_edit_tool_name}` tool.
+All changes to files must be made using the `edit_file` tool.
 """
     )

@@ -4,17 +4,15 @@ from typing import Optional, Any
 import git
 import langchain_core.messages.utils as msg_utils
 from langchain.agents import AgentExecutor
-from langchain.agents.format_scratchpad import format_to_tool_messages
 from langchain.agents.output_parsers import ToolsAgentOutputParser
 from langchain.tools.render import render_text_description
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableLambda, RunnableConfig
 from langchain_core.tools import StructuredTool
 
-from aider import prompts
 from aider.utils import format_content
 from motleycrew.agents import MotleyOutputHandler
 from motleycrew.agents.langchain import LangchainMotleyAgent
@@ -64,16 +62,6 @@ class MotleyCrewCoder(EditBlockCoder):
                 return
 
     def send_new_user_message(self, inp):
-        self.aider_edited_files = []
-
-        self.cur_messages += [
-            dict(role="user", content=inp),
-        ]
-
-        messages = self.format_messages()
-
-        self.io.log_llm_history("TO LLM", messages)
-
         # TODO: display PromptTemplates here
         # if self.verbose:
         #     utils.show_messages(messages, functions=self.functions)
@@ -81,7 +69,7 @@ class MotleyCrewCoder(EditBlockCoder):
         try:
             # TODO: function calls
             # yield from self.send(messages, functions=self.functions)
-            return self.agent.invoke({"prompt": messages})
+            return self.agent.invoke({"prompt": inp})
         except KeyboardInterrupt:
             self.keyboard_interrupt()
         # except ExhaustedContextWindow:
@@ -150,8 +138,6 @@ class MotleyCrewCoder(EditBlockCoder):
         if max_input_tokens is None or total_tokens < max_input_tokens:
             messages += [self.gpt_prompts.system_reminder]
 
-        messages += [MessagesPlaceholder(variable_name="agent_scratchpad")]
-
         return self.create_and_fill_prompt_template(messages)
 
     def create_and_fill_prompt_template(self, messages: list):
@@ -203,7 +189,7 @@ class AddFilesTool(MotleyTool):
         for path in files:
             self.coder.add_rel_fname(path)
 
-        return prompts.added_files.format(fnames=", ".join(files))
+        return self.coder.gpt_prompts.added_files.format(fnames=", ".join(files))
 
 
 class FileEditTool(MotleyTool):
@@ -348,22 +334,25 @@ class CoderAgent(LangchainMotleyAgent):
             llm_with_tools = llm.bind_tools(tools=tools_for_langchain)
             tools_description = render_text_description(tools_for_langchain)
 
-            def fill_prompt(input: dict):
-                prompt = input["input"]
-                prompt = prompt.invoke(
-                    dict(
-                        tools=tools_description,
-                        add_files_tool_name=ADD_FILES_TOOL_NAME,
-                        file_edit_tool_name=FILE_EDIT_TOOL_NAME,
-                        return_to_user_tool_name=RETURN_TO_USER_TOOL_NAME,
-                        agent_scratchpad=format_to_tool_messages(input["intermediate_steps"]),
-                    )
-                )
+            def prepare_messages(input: dict):
+                self.coder.partial_response_content = ""
+                self.coder.partial_response_function_call = None
+                self.coder.aider_edited_files = []
+
+                self.coder.cur_messages += [
+                    dict(role="user", content=input["input"]),
+                ]
+
+                messages = self.coder.format_messages()
+
+                self.coder.io.log_llm_history("TO LLM", messages)
+
+                prompt = messages.invoke(dict(tools=tools_description))
                 return prompt
 
             agent = (
                 RunnableLambda(print_passthrough)
-                | RunnableLambda(fill_prompt)
+                | RunnableLambda(prepare_messages)
                 | llm_with_tools
                 | ToolsAgentOutputParser()
             )
