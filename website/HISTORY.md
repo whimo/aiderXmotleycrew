@@ -12,6 +12,29 @@ cog.out(text)
 
 # Release history
 
+### v0.40.6
+
+- Fixed `/undo` so it works with `--no-attribute-author`.
+
+### v0.40.5
+
+- Bump versions to pickup latest litellm to fix streaming issue with Gemini
+  - https://github.com/BerriAI/litellm/issues/4408
+
+### v0.40.1
+
+- Improved context awareness of repomap.
+- Restored proper `--help` functionality.
+
+### v0.40.0
+
+- Improved prompting to discourage Sonnet from wasting tokens emitting unchanging code (#705).
+- Improved error info for token limit errors.
+- Options to suppress adding "(aider)" to the [git author and committer names](https://aider.chat/docs/git.html#commit-attribution).
+- Use `--model-settings-file` to customize per-model settings, like use of repo-map (by @caseymcc).
+- Improved invocation of flake8 linter for python code.
+
+
 ### v0.39.0
 
 - Use `--sonnet` for Claude 3.5 Sonnet, which is the top model on [aider's LLM code editing leaderboard](https://aider.chat/docs/leaderboards/#claude-35-sonnet-takes-the-top-spot).

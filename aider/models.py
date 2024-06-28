@@ -1,12 +1,12 @@
 import difflib
 import json
-import yaml
 import math
 import os
 import sys
 from dataclasses import dataclass, fields
 from typing import Optional
 
+import yaml
 from PIL import Image
 
 from aider import urls
@@ -27,6 +27,7 @@ class ModelSettings:
     lazy: bool = False
     reminder_as_sys_msg: bool = False
     examples_as_sys_msg: bool = False
+    can_prefill: bool = False
 
 
 # https://platform.openai.com/docs/models/gpt-4-and-gpt-4-turbo
@@ -166,6 +167,7 @@ MODEL_SETTINGS = [
         weak_model_name="claude-3-haiku-20240307",
         use_repo_map=True,
         send_undo_reply=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "openrouter/anthropic/claude-3-opus",
@@ -173,29 +175,37 @@ MODEL_SETTINGS = [
         weak_model_name="openrouter/anthropic/claude-3-haiku",
         use_repo_map=True,
         send_undo_reply=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "claude-3-sonnet-20240229",
         "whole",
         weak_model_name="claude-3-haiku-20240307",
+        can_prefill=True,
     ),
     ModelSettings(
         "claude-3-5-sonnet-20240620",
         "diff",
         weak_model_name="claude-3-haiku-20240307",
         use_repo_map=True,
+        examples_as_sys_msg=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "anthropic/claude-3-5-sonnet-20240620",
         "diff",
         weak_model_name="claude-3-haiku-20240307",
         use_repo_map=True,
+        examples_as_sys_msg=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "openrouter/anthropic/claude-3.5-sonnet",
         "diff",
         weak_model_name="openrouter/anthropic/claude-3-haiku-20240307",
         use_repo_map=True,
+        examples_as_sys_msg=True,
+        can_prefill=True,
     ),
     # Vertex AI Claude models
     ModelSettings(
@@ -203,6 +213,8 @@ MODEL_SETTINGS = [
         "diff",
         weak_model_name="vertex_ai/claude-3-haiku@20240307",
         use_repo_map=True,
+        examples_as_sys_msg=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "vertex_ai/claude-3-opus@20240229",
@@ -210,11 +222,13 @@ MODEL_SETTINGS = [
         weak_model_name="vertex_ai/claude-3-haiku@20240307",
         use_repo_map=True,
         send_undo_reply=True,
+        can_prefill=True,
     ),
     ModelSettings(
         "vertex_ai/claude-3-sonnet@20240229",
         "whole",
         weak_model_name="vertex_ai/claude-3-haiku@20240307",
+        can_prefill=True,
     ),
     # Cohere
     ModelSettings(
@@ -325,7 +339,10 @@ class Model:
         self.missing_keys = res.get("missing_keys")
         self.keys_in_environment = res.get("keys_in_environment")
 
-        if self.info.get("max_input_tokens", 0) < 32 * 1024:
+        max_input_tokens = self.info.get("max_input_tokens")
+        if not max_input_tokens:
+            max_input_tokens = 0
+        if max_input_tokens < 32 * 1024:
             self.max_chat_history_tokens = 1024
         else:
             self.max_chat_history_tokens = 2 * 1024
@@ -368,6 +385,15 @@ class Model:
 
         if "gpt-3.5" in model or "gpt-4" in model:
             self.reminder_as_sys_msg = True
+
+        if "anthropic" in model:
+            self.can_prefill = True
+
+        if "3.5-sonnet" in model or "3-5-sonnet" in model:
+            self.edit_format = "diff"
+            self.use_repo_map = True
+            self.examples_as_sys_msg = True
+            self.can_prefill = True
 
         # use the defaults
         if self.edit_format == "diff":
@@ -471,21 +497,24 @@ class Model:
             return validate_variables(["GROQ_API_KEY"])
 
         return res
-    
+
+
 def register_models(model_settings_fnames):
     files_loaded = []
     for model_settings_fname in model_settings_fnames:
         if not os.path.exists(model_settings_fname):
             continue
-        
+
         try:
             with open(model_settings_fname, "r") as model_settings_file:
                 model_settings_list = yaml.safe_load(model_settings_file)
 
             for model_settings_dict in model_settings_list:
                 model_settings = ModelSettings(**model_settings_dict)
-                existing_model_settings = next((ms for ms in MODEL_SETTINGS if ms.name == model_settings.name), None)
-                
+                existing_model_settings = next(
+                    (ms for ms in MODEL_SETTINGS if ms.name == model_settings.name), None
+                )
+
                 if existing_model_settings:
                     MODEL_SETTINGS.remove(existing_model_settings)
                 MODEL_SETTINGS.append(model_settings)
@@ -501,14 +530,14 @@ def register_litellm_models(model_fnames):
     for model_fname in model_fnames:
         if not os.path.exists(model_fname):
             continue
-        
+
         try:
             with open(model_fname, "r") as model_def_file:
                 model_def = json.load(model_def_file)
             litellm.register_model(model_def)
         except Exception as e:
             raise Exception(f"Error loading model definition from {model_fname}: {e}")
-        
+
         files_loaded.append(model_fname)
 
     return files_loaded
@@ -545,7 +574,7 @@ def sanity_check_model(io, model):
     if not model.info:
         show = True
         io.tool_output(
-            f"Model {model}: Unknown model, context window size and token costs unavailable."
+            f"Model {model}: Unknown context window size and costs, using sane defaults."
         )
 
         possible_matches = fuzzy_match_models(model.name)
@@ -554,12 +583,12 @@ def sanity_check_model(io, model):
             for match in possible_matches:
                 fq, m = match
                 if fq == m:
-                    io.tool_error(f"- {m}")
+                    io.tool_output(f"- {m}")
                 else:
-                    io.tool_error(f"- {m} ({fq})")
+                    io.tool_output(f"- {m} ({fq})")
 
     if show:
-        io.tool_error(urls.model_warnings)
+        io.tool_output(f"For more info, see: {urls.model_warnings}\n")
 
 
 def fuzzy_match_models(name):

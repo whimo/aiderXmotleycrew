@@ -8,11 +8,11 @@ import sys
 import threading
 import time
 import traceback
+from collections import defaultdict
 from json.decoder import JSONDecodeError
 from pathlib import Path
 
 import git
-import openai
 from jsonschema import Draft7Validator
 from rich.console import Console, Text
 from rich.markdown import Markdown
@@ -35,7 +35,7 @@ class MissingAPIKeyError(ValueError):
     pass
 
 
-class ExhaustedContextWindow(Exception):
+class FinishReasonLength(Exception):
     pass
 
 
@@ -219,6 +219,7 @@ class Coder:
         test_cmd=None,
         attribute_author=True,
         attribute_committer=True,
+        attribute_commit_message=False,
     ):
         if not fnames:
             fnames = []
@@ -278,6 +279,7 @@ class Coder:
                     models=main_model.commit_message_models(),
                     attribute_author=attribute_author,
                     attribute_committer=attribute_committer,
+                    attribute_commit_message=attribute_commit_message,
                 )
                 self.root = self.repo.root
             except FileNotFoundError:
@@ -471,6 +473,21 @@ class Coder:
         words = set(re.split(r"\W+", text))
         return words
 
+    def get_ident_filename_matches(self, idents):
+        all_fnames = defaultdict(set)
+        for fname in self.get_all_relative_files():
+            base = Path(fname).with_suffix("").name.lower()
+            if len(base) >= 5:
+                all_fnames[base].add(fname)
+
+        matches = set()
+        for ident in idents:
+            if len(ident) < 5:
+                continue
+            matches.update(all_fnames[ident.lower()])
+
+        return matches
+
     def get_repo_map(self):
         if not self.repo_map:
             return
@@ -478,6 +495,8 @@ class Coder:
         cur_msg_text = self.get_cur_message_text()
         mentioned_fnames = self.get_file_mentions(cur_msg_text)
         mentioned_idents = self.get_ident_mentions(cur_msg_text)
+
+        mentioned_fnames.update(self.get_ident_filename_matches(mentioned_idents))
 
         other_files = set(self.get_all_abs_files()) - set(self.abs_fnames)
         repo_content = self.repo_map.get_repo_map(
@@ -791,28 +810,43 @@ class Coder:
         if self.verbose:
             utils.show_messages(messages, functions=self.functions)
 
+        multi_response_content = ""
         exhausted = False
         interrupted = False
-        try:
-            yield from self.send(messages, functions=self.functions)
-        except KeyboardInterrupt:
-            interrupted = True
-        except ExhaustedContextWindow:
-            exhausted = True
-        except litellm.exceptions.BadRequestError as err:
-            if "ContextWindowExceededError" in err.message:
+        while True:
+            try:
+                yield from self.send(messages, functions=self.functions)
+                break
+            except KeyboardInterrupt:
+                interrupted = True
+                break
+            except litellm.ContextWindowExceededError:
+                # The input is overflowing the context window!
                 exhausted = True
-            else:
-                self.io.tool_error(f"BadRequestError: {err}")
+                break
+            except litellm.exceptions.BadRequestError as br_err:
+                self.io.tool_error(f"BadRequestError: {br_err}")
                 return
-        except openai.BadRequestError as err:
-            if "maximum context length" in str(err):
-                exhausted = True
-            else:
-                raise err
-        except Exception as err:
-            self.io.tool_error(f"Unexpected error: {err}")
-            return
+            except FinishReasonLength:
+                # We hit the 4k output limit!
+                if not self.main_model.can_prefill:
+                    exhausted = True
+                    break
+
+                # Use prefill to continue the response
+                multi_response_content += self.partial_response_content
+                if messages[-1]["role"] == "assistant":
+                    messages[-1]["content"] = multi_response_content
+                else:
+                    messages.append(dict(role="assistant", content=multi_response_content))
+            except Exception as err:
+                self.io.tool_error(f"Unexpected error: {err}")
+                traceback.print_exc()
+                return
+
+        if multi_response_content:
+            multi_response_content += self.partial_response_content
+            self.partial_response_content = multi_response_content
 
         if exhausted:
             self.show_exhausted_error()
@@ -898,27 +932,27 @@ class Coder:
 
         total_tokens = input_tokens + output_tokens
 
-        if output_tokens >= max_output_tokens:
-            out_err = " -- exceeded output limit!"
-        else:
-            out_err = ""
+        fudge = 0.7
 
-        if input_tokens >= max_input_tokens:
-            inp_err = " -- context window exhausted!"
-        else:
-            inp_err = ""
+        out_err = ""
+        if output_tokens >= max_output_tokens * fudge:
+            out_err = " -- possibly exceeded output limit!"
 
-        if total_tokens >= max_input_tokens:
-            tot_err = " -- context window exhausted!"
-        else:
-            tot_err = ""
+        inp_err = ""
+        if input_tokens >= max_input_tokens * fudge:
+            inp_err = " -- possibly exhausted context window!"
+
+        tot_err = ""
+        if total_tokens >= max_input_tokens * fudge:
+            tot_err = " -- possibly exhausted context window!"
 
         res = ["", ""]
         res.append(f"Model {self.main_model.name} has hit a token limit!")
+        res.append("Token counts below are approximate.")
         res.append("")
-        res.append(f"Input tokens: {input_tokens:,} of {max_input_tokens:,}{inp_err}")
-        res.append(f"Output tokens: {output_tokens:,} of {max_output_tokens:,}{out_err}")
-        res.append(f"Total tokens: {total_tokens:,} of {max_input_tokens:,}{tot_err}")
+        res.append(f"Input tokens: ~{input_tokens:,} of {max_input_tokens:,}{inp_err}")
+        res.append(f"Output tokens: ~{output_tokens:,} of {max_output_tokens:,}{out_err}")
+        res.append(f"Total tokens: ~{total_tokens:,} of {max_input_tokens:,}{tot_err}")
 
         if output_tokens >= max_output_tokens:
             res.append("")
@@ -927,7 +961,7 @@ class Coder:
             res.append("- Break your code into smaller source files.")
             if "diff" not in self.main_model.edit_format:
                 res.append(
-                    "- Try using a stronger model like gpt-4o or opus that can return diffs."
+                    "- Use a stronger model like gpt-4o, sonnet or opus that can return diffs."
                 )
 
         if input_tokens >= max_input_tokens or total_tokens >= max_input_tokens:
@@ -1040,14 +1074,14 @@ class Coder:
         except KeyboardInterrupt:
             self.keyboard_interrupt()
             interrupted = True
-
-        if self.partial_response_content:
-            self.io.ai_output(self.partial_response_content)
-        elif self.partial_response_function_call:
-            # TODO: push this into subclasses
-            args = self.parse_partial_args()
-            if args:
-                self.io.ai_output(json.dumps(args, indent=4))
+        finally:
+            if self.partial_response_content:
+                self.io.ai_output(self.partial_response_content)
+            elif self.partial_response_function_call:
+                # TODO: push this into subclasses
+                args = self.parse_partial_args()
+                if args:
+                    self.io.ai_output(json.dumps(args, indent=4))
 
         if interrupted:
             raise KeyboardInterrupt
@@ -1082,7 +1116,7 @@ class Coder:
         if show_func_err and show_content_err:
             self.io.tool_error(show_func_err)
             self.io.tool_error(show_content_err)
-            raise Exception("No data found in openai response!")
+            raise Exception("No data found in LLM response!")
 
         tokens = None
         if hasattr(completion, "usage") and completion.usage is not None:
@@ -1110,6 +1144,12 @@ class Coder:
         if tokens is not None:
             self.io.tool_output(tokens)
 
+        if (
+            hasattr(completion.choices[0], "finish_reason")
+            and completion.choices[0].finish_reason == "length"
+        ):
+            raise FinishReasonLength()
+
     def show_send_output_stream(self, completion):
         if self.show_pretty():
             mdargs = dict(style=self.assistant_output_color, code_theme=self.code_theme)
@@ -1126,7 +1166,7 @@ class Coder:
                     hasattr(chunk.choices[0], "finish_reason")
                     and chunk.choices[0].finish_reason == "length"
                 ):
-                    raise ExhaustedContextWindow()
+                    raise FinishReasonLength()
 
                 try:
                     func = chunk.choices[0].delta.function_call

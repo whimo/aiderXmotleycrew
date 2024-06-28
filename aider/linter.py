@@ -11,6 +11,7 @@ from pathlib import Path
 
 from grep_ast import TreeContext, filename_to_lang
 from tree_sitter_languages import get_parser  # noqa: E402
+from contextlib import redirect_stdout
 
 from aider.dump import dump  # noqa: F401
 
@@ -123,30 +124,29 @@ class Linter:
 
     def flake8_lint(self, rel_fname):
         fatal = "E9,F821,F823,F831,F406,F407,F701,F702,F704,F706"
-        flake8 = f"flake8 --select={fatal} --show-source --isolated"
+        flake8_cmd = [
+            sys.executable,
+            "-m",
+            "flake8",
+            f"--select={fatal}",
+            "--show-source",
+            "--isolated",
+            rel_fname,
+        ]
 
-        original_argv = sys.argv
-        original_stdout = sys.stdout
-
-        sys.argv = flake8.split() + [rel_fname]
-        sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
-
-        text = f"## Running: {' '.join(sys.argv)}\n\n"
+        text = f"## Running: {' '.join(flake8_cmd)}\n\n"
 
         try:
-            runpy.run_module("flake8", run_name="__main__")
-        except SystemExit as e:
-            if e.code == 0:
-                errors = None
-            else:
-                sys.stdout.seek(0)
-                errors = sys.stdout.read()
-
-            sys.stdout = original_stdout
-            sys.argv = original_argv
-        finally:
-            sys.stdout = original_stdout
-            sys.argv = original_argv
+            result = subprocess.run(
+                flake8_cmd,
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            errors = result.stdout + result.stderr
+        except Exception as e:
+            errors = f"Error running flake8: {str(e)}"
 
         if not errors:
             return
