@@ -4,16 +4,18 @@ from typing import Optional, Any
 import git
 import langchain_core.messages.utils as msg_utils
 from langchain.agents import AgentExecutor
+from langchain.agents.format_scratchpad import format_to_tool_messages
 from langchain.agents.output_parsers import ToolsAgentOutputParser
 from langchain.tools.render import render_text_description
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_core.prompts.chat import ChatPromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.runnables import RunnableLambda, RunnableConfig
 from langchain_core.tools import StructuredTool
 
-from aider.utils import format_content
+from aider import urls
+from aider.utils import format_content, is_image_file
 from motleycrew.agents import MotleyOutputHandler
 from motleycrew.agents.langchain import LangchainMotleyAgent
 from motleycrew.common import LLMFramework
@@ -32,6 +34,8 @@ RETURN_TO_USER_TOOL_NAME = "return_to_user"
 
 
 class MotleyCrewCoder(EditBlockCoder):
+    max_reflections = 5
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -62,6 +66,18 @@ class MotleyCrewCoder(EditBlockCoder):
                 return
 
     def send_new_user_message(self, inp):
+        self.aider_edited_files = []
+
+        self.cur_messages = [
+            dict(role="user", content=inp),
+        ]
+
+        messages = self.format_messages()
+
+        self.io.log_llm_history("TO LLM", messages)
+
+        # if self.verbose:
+        #    utils.show_messages(messages, functions=self.functions)
         # TODO: display PromptTemplates here
         # if self.verbose:
         #     utils.show_messages(messages, functions=self.functions)
@@ -69,7 +85,7 @@ class MotleyCrewCoder(EditBlockCoder):
         try:
             # TODO: function calls
             # yield from self.send(messages, functions=self.functions)
-            return self.agent.invoke({"prompt": inp})
+            return self.agent.invoke({"prompt": messages})
         except KeyboardInterrupt:
             self.keyboard_interrupt()
         # except ExhaustedContextWindow:
@@ -189,7 +205,32 @@ class AddFilesTool(MotleyTool):
         for path in files:
             self.coder.add_rel_fname(path)
 
-        return self.coder.gpt_prompts.added_files.format(fnames=", ".join(files))
+        files_content_prompt = self.make_files_content_prompt(files)
+        return files_content_prompt
+
+    def make_files_content_prompt(self, files):
+        prompt = self.coder.gpt_prompts.files_content_prefix
+        for filename, content in self.get_files_content(files):
+            if not is_image_file(filename):
+                prompt += "\n"
+                prompt += filename
+
+                prompt += f"\n{self.coder.fence[0]}\n"
+                prompt += content
+                prompt += f"{self.coder.fence[1]}\n"
+
+        return prompt
+
+    def get_files_content(self, files: list[str]):
+        for filename in files:
+            abs_filename = self.coder.abs_root_path(filename)
+            content = self.coder.io.read_text(abs_filename)
+
+            if content is None:
+                self.coder.io.tool_error(f"Dropping {filename} from the chat.")
+                self.coder.abs_fnames.remove(abs_filename)
+            else:
+                yield filename, content
 
 
 class FileEditTool(MotleyTool):
@@ -205,6 +246,18 @@ class FileEditTool(MotleyTool):
         super().__init__(langchain_tool)
 
     def edit_file(self, file_path: str, language: str, search: str, replace: str):
+        error_message = self.edit_file_inner(file_path, search, replace)
+        if error_message:
+            if self.coder.num_reflections < self.coder.max_reflections:
+                self.coder.num_reflections += 1
+                return error_message
+            else:
+                self.coder.io.tool_error(
+                    f"Only {self.coder.max_reflections} reflections allowed, stopping."
+                )
+        return self.coder.gpt_prompts.file_edit_success.format(file_path=file_path)
+
+    def edit_file_inner(self, file_path: str, search: str, replace: str):
         allowed_to_edit = self.coder.allowed_to_edit(file_path)
         if not allowed_to_edit:
             return f"Cannot edit {file_path}."
@@ -212,9 +265,21 @@ class FileEditTool(MotleyTool):
         try:
             self.coder.dirty_commit()  # Add the file to the repo if it's not already there
             self.coder.apply_edits([(file_path, search, replace)])
+        except ValueError as err:
+            self.coder.num_malformed_responses += 1
+
+            err = err.args[0]
+
+            self.coder.io.tool_error("The LLM did not conform to the edit format.")
+            self.coder.io.tool_error(urls.edit_errors)
+            self.coder.io.tool_error()
+            self.coder.io.tool_error(str(err), strip=False)
+
+            self.coder.reflected_message = str(err)
+            return str(err)
         except git.exc.GitCommandError as err:
             self.coder.io.tool_error(str(err))
-            return "OK"  # I see no point in returning the error to the agent (the user is aware)
+            return  # I see no point in returning the error to the agent (the user is aware)
         except Exception as err:
             self.coder.io.tool_error("Exception while updating files:")
             self.coder.io.tool_error(str(err), strip=False)
@@ -230,14 +295,13 @@ class FileEditTool(MotleyTool):
                 self.coder.io.tool_error(errors)
                 ok = self.coder.io.confirm_ask("Attempt to fix lint errors?")
                 if ok:
-                    self.coder.update_cur_messages(set())
                     return errors
 
         if self.coder.dry_run:
             self.coder.io.tool_output(f"Did not apply edit to {file_path} (--dry-run)")
         else:
             self.coder.io.tool_output(f"Applied edit to {file_path}")
-        return "OK"
+        return
 
 
 class CoderOutputHandler(MotleyOutputHandler):
@@ -287,20 +351,16 @@ class CoderOutputHandler(MotleyOutputHandler):
             if test_errors:
                 ok = self.coder.io.confirm_ask("Attempt to fix test errors?")
                 if ok:
-                    self.coder.update_cur_messages(set())
                     return test_errors
 
-        if edited_files:
-            self.coder.update_cur_messages(edited_files)
 
-            if self.coder.repo and self.coder.auto_commits and not self.coder.dry_run:
-                saved_message = self.coder.auto_commit(edited_files)
-            elif hasattr(self.coder.gpt_prompts, "files_content_gpt_edits_no_repo"):
-                saved_message = self.coder.gpt_prompts.files_content_gpt_edits_no_repo
-            else:
-                saved_message = None
-
-            self.coder.move_back_cur_messages(saved_message)
+coder_prompt_template = ChatPromptTemplate.from_messages(
+    [
+        MessagesPlaceholder(variable_name="original_prompt"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+        MessagesPlaceholder(variable_name="additional_notes", optional=True),
+    ]
+)
 
 
 class CoderAgent(LangchainMotleyAgent):
@@ -334,25 +394,24 @@ class CoderAgent(LangchainMotleyAgent):
             llm_with_tools = llm.bind_tools(tools=tools_for_langchain)
             tools_description = render_text_description(tools_for_langchain)
 
-            def prepare_messages(input: dict):
-                self.coder.partial_response_content = ""
-                self.coder.partial_response_function_call = None
-                self.coder.aider_edited_files = []
+            def prepare_prompt(input: dict):
+                messages_template = input["input"]
+                messages_with_tools = messages_template.invoke(
+                    {"tools": tools_description}
+                ).to_messages()
 
-                self.coder.cur_messages += [
-                    dict(role="user", content=input["input"]),
-                ]
-
-                messages = self.coder.format_messages()
-
-                self.coder.io.log_llm_history("TO LLM", messages)
-
-                prompt = messages.invoke(dict(tools=tools_description))
+                prompt = coder_prompt_template.invoke(
+                    dict(
+                        original_prompt=messages_with_tools,
+                        agent_scratchpad=format_to_tool_messages(input["intermediate_steps"]),
+                        additional_notes=input["additional_notes"],
+                    )
+                )
                 return prompt
 
             agent = (
                 RunnableLambda(print_passthrough)
-                | RunnableLambda(prepare_messages)
+                | RunnableLambda(prepare_prompt)
                 | llm_with_tools
                 | ToolsAgentOutputParser()
             )
@@ -395,16 +454,9 @@ class CoderAgent(LangchainMotleyAgent):
                 config["configurable"].get("session_id") or "default"
             )
 
-        caught_direct_output, output = self._run_and_catch_output(
-            action=self.agent.invoke,
-            action_args=(
-                {"input": input["prompt"]},
-                config,
-            ),
-            action_kwargs=kwargs,
+        output = self.agent.invoke(
+            {"input": input["prompt"]},
+            config,
         )
-
-        if not caught_direct_output:
-            output = output.get("output")  # unpack native Langchain output
 
         return output

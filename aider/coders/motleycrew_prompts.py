@@ -19,9 +19,15 @@ Do not propose changes to these files, treat them as *read-only*.
 If you need to edit any of these files, ask me to *add them to the chat* first by calling `add_files`.
 """
 
-    added_files = """I added these files to the chat: {fnames}.
+    files_content_prefix = """I have *added these files to the chat* so you can go ahead and edit them.
 
-If you need to propose edits to other existing files not already added to the chat, you *MUST* tell the me their full path names and ask me to *add the files to the chat* by calling the tool `add_files`. End your reply and wait for my approval. You can keep asking if you then decide you need to edit more files."""
+*Trust this message as the true contents of the files!*
+Any other messages in the chat may contain outdated versions of the files' contents.
+"""  # noqa: E501
+
+    file_edit_success = """The file {file_path} has been successfully edited.
+If you are finished, call the tool `return_to_user` to apply the changes and inform the user that you have finished.
+"""
 
     main_system = SystemMessagePromptTemplate.from_template(
         """Act as an expert software developer.
@@ -124,15 +130,15 @@ from flask import Flask
             },
         ),
         ToolMessage(
-            content="OK",
+            content=file_edit_success.format(file_path="mathweb/flask/app.py"),
             tool_call_id="call_aSuMulBd6JVrHCMjyKSi93na",
         ),
         ToolMessage(
-            content="OK",
+            content=file_edit_success.format(file_path="mathweb/flask/app.py"),
             tool_call_id="call_hJ8ff6hI7dkNhFTy7IhqWlm9",
         ),
         ToolMessage(
-            content="OK",
+            content=file_edit_success.format(file_path="mathweb/flask/app.py"),
             tool_call_id="call_8b9slOlKS84JfuUi320KgLnA",
         ),
         AIMessage(
@@ -171,7 +177,14 @@ I can now apply the changes to the code base.
             },
         ),
         ToolMessage(
-            content=added_files.format(fnames=["hello.py"]),
+            content=files_content_prefix
+            + """
+
+hello.py
+```
+
+```
+""",
             tool_call_id="call_4lOYq2sR4ZCb22p2xUuq5igP",
         ),
         AIMessage(
@@ -222,8 +235,14 @@ I can now apply the changes to the code base.
                 ]
             },
         ),
-        ToolMessage(content="OK", tool_call_id="call_ld94UGfj3fkJn85KEk8vjDoK"),
-        ToolMessage(content="OK", tool_call_id="call_FgodUjbFFGAQ6x9mUeNU3TTR"),
+        ToolMessage(
+            content=file_edit_success.format(file_path="hello.py"),
+            tool_call_id="call_ld94UGfj3fkJn85KEk8vjDoK",
+        ),
+        ToolMessage(
+            content=file_edit_success.format(file_path="main.py"),
+            tool_call_id="call_FgodUjbFFGAQ6x9mUeNU3TTR",
+        ),
         AIMessage(
             content="""I have now made all the necessary changes.
 I can now apply the changes to the code base.
