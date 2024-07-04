@@ -1,7 +1,7 @@
 # flake8: noqa: E501
 import json
 
-from langchain_core.messages import HumanMessage, AIMessage, ToolCall, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.prompts import SystemMessagePromptTemplate
 
 from .editblock_prompts import EditBlockPrompts
@@ -145,13 +145,23 @@ from flask import Flask
             content="""I have now made all the necessary changes.
 I can now apply the changes to the code base.
 """,
-            tool_calls=[
-                ToolCall(
-                    name="return_to_user",
-                    args=dict(),
-                    id="call_fkr8403nFUv73kc9mN547IVm",
-                ),
-            ],
+            additional_kwargs={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_fkr8403nFUv73kc9mN547IVm",
+                        "function": {
+                            "arguments": json.dumps(dict()),
+                            "name": "return_to_user",
+                        },
+                        "type": "function",
+                    },
+                ]
+            },
+        ),
+        ToolMessage(
+            content="Changes applied successfully.",
+            tool_call_id="call_fkr8403nFUv73kc9mN547IVm",
         ),
         HumanMessage(
             content="Refactor hello() into its own file.",
@@ -247,13 +257,23 @@ hello.py
             content="""I have now made all the necessary changes.
 I can now apply the changes to the code base.
 """,
-            tool_calls=[
-                ToolCall(
-                    name="return_to_user",
-                    args=dict(),
-                    id="call_7TmRhiBSX5ud8DW1RyZSEcDf",
-                ),
-            ],
+            additional_kwargs={
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_7TmRhiBSX5ud8DW1RyZSEcDf",
+                        "function": {
+                            "arguments": json.dumps(dict()),
+                            "name": "return_to_user",
+                        },
+                        "type": "function",
+                    },
+                ]
+            },
+        ),
+        ToolMessage(
+            content="Changes applied successfully.",
+            tool_call_id="call_7TmRhiBSX5ud8DW1RyZSEcDf",
         ),
     ]
 
