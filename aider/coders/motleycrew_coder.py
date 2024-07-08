@@ -404,7 +404,7 @@ class CoderAgent(LangchainMotleyAgent):
                     dict(
                         original_prompt=messages_with_tools,
                         agent_scratchpad=format_to_tool_messages(input["intermediate_steps"]),
-                        additional_notes=input["additional_notes"],
+                        additional_notes=input.get("additional_notes") or [],
                     )
                 )
                 return prompt
