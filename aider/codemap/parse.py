@@ -22,7 +22,8 @@ class Tag:
     name: str
     kind: str
     fname: str
-    parent_names: tuple[str] = ()
+    text: str
+    parent_names: tuple[str, ...] = ()
 
     @property
     def full_name(self):
@@ -32,7 +33,15 @@ class Tag:
             return tuple(list(self.parent_names) + [self.name])
 
     def to_tuple(self):
-        return (self.rel_fname, self.line, self.name, self.kind, self.fname, self.parent_names)
+        return (
+            self.rel_fname,
+            self.line,
+            self.name,
+            self.kind,
+            self.fname,
+            self.text,
+            self.parent_names,
+        )
 
     def __getitem__(self, item):
         return self.to_tuple()[item]
@@ -94,6 +103,7 @@ def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[T
                 parent_names=parent_names,
                 kind=kind,
                 line=name_node.start_point[0],
+                text=node.text.decode("utf-8"),
             )
         )
 

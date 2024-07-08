@@ -130,6 +130,12 @@ def rank_tags_directly(
 
 
 def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:
+    """
+    Build a graph of tags, with edges from references to definitions
+    And with edges from parent definitions to child definitions in the same file
+    :param tags:
+    :return:
+    """
     def_map = defaultdict(set)
     for tag in tags:
         if tag.kind == "def":
@@ -143,9 +149,8 @@ def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:
             G.add_node(tag, kind=tag.kind)
         elif tag.kind == "ref":
             G.add_node(tag, kind=tag.kind)
-            if tag.name in def_map:
-                for def_tag in def_map[tag.name]:
-                    G.add_edge(tag, def_tag)
+            for def_tag in def_map[tag.name]:
+                G.add_edge(tag, def_tag)
         # Build up definition hierarchy
         # A parent definition for a tag must:
         # - be in the same file

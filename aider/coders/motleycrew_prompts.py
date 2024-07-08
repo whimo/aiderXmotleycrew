@@ -8,18 +8,20 @@ from .editblock_prompts import EditBlockPrompts
 
 
 class MotleyCrewPrompts(EditBlockPrompts):
-    files_no_full_files_with_repo_map = """Don't try and edit any existing code without asking me to add the files to the chat!
-Using the tool `add_files`, tell me which files in my repo are the most likely to **need changes** to solve the requests I make, and then stop so I can add them to the chat.
+    files_no_full_files_with_repo_map = """
+    Don't try and edit any existing code without adding files to the chat first!
+Use the tool `add_files` to add the files that **need changes** to solve the requests I make.
 Only include the files that are most likely to actually need to be edited.
 Don't include files that might contain relevant context, just files that will need to be changed.
+Do not add any test files or files that are not relevant to the task.
 """  # noqa: E501
 
     repo_content_prefix = """Here are summaries of some files present in my git repository.
 Do not propose changes to these files, treat them as *read-only*.
-If you need to edit any of these files, ask me to *add them to the chat* first by calling `add_files`.
+If you need to edit any of these files, *add them to the chat* first by calling `add_files`.
 """
 
-    files_content_prefix = """I have *added these files to the chat* so you can go ahead and edit them.
+    files_content_prefix = """The files have been *added to the chat* so you can go ahead and edit them.
 
 *Trust this message as the true contents of the files!*
 Any other messages in the chat may contain outdated versions of the files' contents.
@@ -40,10 +42,17 @@ If the request is ambiguous, ask questions using the tool `return_to_user`.
 Always reply to the user in the same language they are using.
 
 Once you understand the request you MUST:
-1. Decide if you need to propose *SEARCH/REPLACE* edits to any files that haven't been added to the chat. You can create new files without asking. But if you need to propose edits to existing files not already added to the chat, you *MUST* call the tool `add_files` with their full path names to ask the user to *add the files to the chat*. Make the tool call and wait for their approval. You can keep calling if you then decide you need to edit more files.
+1. Decide if you need to propose *SEARCH/REPLACE* edits to any files that haven't been added to the chat. 
+You can create new files without asking. But if you need to propose edits to existing files not already added to the chat, 
+you *MUST* call the tool `add_files` with their full path names to *add the files to the chat*. 
+Make the tool call and wait for it to report success or failure. 
+You can keep calling the tool if you then decide you need to edit more files.
 2. Think step-by-step and explain the needed changes with a numbered list of short sentences.
-3. Make the changes to the files by calling the tool `edit_file` with the *SEARCH/REPLACE arguments* for each change. You can keep calling the tool with new *SEARCH/REPLACE arguments* until you have made all the necessary changes. ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `edit_file` TOOL CALL!
-4. After making all the necessary changes, you MUST call the tool `return_to_user` to apply the changes and to inform the user that you have finished. You can't call any tools after this step.
+3. Make the changes to the files by calling the tool `edit_file` with the *SEARCH/REPLACE arguments* for each change. 
+You can keep calling the tool with new *SEARCH/REPLACE arguments* until you have made all the necessary changes. 
+ONLY EVER RETURN CODE IN THE ARGUMENTS OF THE `edit_file` TOOL CALL!
+4. After making all the necessary changes, you MUST call the tool `return_to_user` to apply the changes and to inform 
+the user that you have finished. You can't call any tools after this step.
 
 You have access to the following tools:
 {tools}

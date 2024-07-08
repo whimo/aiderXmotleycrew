@@ -7,13 +7,14 @@ from typing import List
 
 from pathlib import Path
 
+import networkx as nx
 from diskcache import Cache
 from grep_ast import TreeContext
 from tqdm import tqdm
 
 
 from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
-from aider.codemap.graph import rank_tags, rank_tags_directly  # noqa: F402
+from aider.codemap.graph import rank_tags, rank_tags_directly, build_tag_graph  # noqa: F402
 from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
@@ -103,6 +104,32 @@ class RepoMap:
 
         return repo_content
 
+    def validate_fnames(self, fnames: List[str]) -> List[str]:
+        cleaned_fnames = []
+        for fname in fnames:
+            # TODO: skip files that are obviously not source code, eg .zip files
+            if Path(fname).is_file():
+                cleaned_fnames.append(fname)
+            else:
+                if fname not in self.warned_files:
+                    if Path(fname).exists():
+                        self.io.tool_error(
+                            f"Repo-map can't include {fname}, it is not a normal file"
+                        )
+                    else:
+                        self.io.tool_error(
+                            f"Repo-map can't include {fname}, it doesn't exist (anymore?)"
+                        )
+
+                self.warned_files.add(fname)
+
+        return cleaned_fnames
+
+    def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
+        clean_fnames = self.validate_fnames(fnames)
+        tags = sum([self.get_tags(fname, self.get_rel_fname(fname)) for fname in clean_fnames], [])
+        return build_tag_graph(tags)
+
     def get_rel_fname(self, fname):
         return os.path.relpath(fname, self.root)
 
@@ -165,24 +192,11 @@ class RepoMap:
             fnames = tqdm(fnames)
         self.cache_missing = False
 
-        cleaned_fnames = []
-        for fname in fnames:
-            if not Path(fname).is_file():
-                if fname not in self.warned_files:
-                    if Path(fname).exists():
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it is not a normal file"
-                        )
-                    else:
-                        self.io.tool_error(f"Repo-map can't include {fname}, it no longer exists")
-
-                self.warned_files.add(fname)
-                continue
-            rel_fname = self.get_rel_fname(fname)
-            cleaned_fnames.append((fname, rel_fname))
+        cleaned = self.validate_fnames(fnames)
 
         # All the source code parsing happens here
-        tags = sum([self.get_tags(fname, rel_fname) for fname, rel_fname in cleaned_fnames], [])
+        tag_graph = self.get_tag_graph(cleaned)
+        tags = list(tag_graph.nodes)
 
         # this constructs the graph and ranks the tags based on it
         other_rel_fnames = [self.get_rel_fname(fname) for fname in other_fnames]
@@ -239,7 +253,8 @@ class RepoMap:
         self.tree_cache = dict()
 
         while lower_bound <= upper_bound:
-            tree = self.to_tree(ranked_tags[:middle], chat_rel_fnames)
+            used_tags = [tag for tag in ranked_tags[:middle] if tag[0] not in chat_rel_fnames]
+            tree = self.to_tree(used_tags)
             num_tokens = self.token_count(tree)
 
             if num_tokens < max_map_tokens and num_tokens > best_tree_tokens:
@@ -257,7 +272,7 @@ class RepoMap:
 
     # tree_cache = dict()
 
-    def render_tree(self, abs_fname, rel_fname, lois):
+    def render_tree(self, abs_fname, rel_fname, lois, line_number: bool = True) -> str:
         key = (rel_fname, tuple(sorted(lois)))
 
         if key in self.tree_cache:
@@ -271,7 +286,7 @@ class RepoMap:
             rel_fname,
             code,
             color=False,
-            line_number=False,
+            line_number=True,
             child_context=False,
             last_line=False,
             margin=0,
@@ -287,11 +302,10 @@ class RepoMap:
         self.tree_cache[key] = res
         return res
 
-    def to_tree(self, tags: List[Tag | tuple], chat_rel_fnames):
+    def to_tree(self, tags: List[Tag | tuple]) -> str:
         if not tags:
             return ""
 
-        tags = [tag for tag in tags if tag[0] not in chat_rel_fnames]
         tags = sorted(tags, key=lambda x: tuple(x))
 
         cur_fname = None
