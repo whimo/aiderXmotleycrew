@@ -23,6 +23,7 @@ class Tag:
     kind: str
     fname: str
     text: str
+    byte_range: tuple[int, int]
     parent_names: tuple[str, ...] = ()
 
     @property
@@ -40,6 +41,7 @@ class Tag:
             self.kind,
             self.fname,
             self.text,
+            self.byte_range,
             self.parent_names,
         )
 
@@ -104,6 +106,7 @@ def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[T
                 kind=kind,
                 line=name_node.start_point[0],
                 text=node.text.decode("utf-8"),
+                byte_range=node.byte_range,
             )
         )
 
@@ -192,3 +195,19 @@ def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
     # Use pygments to backfill refs
     refs = refs_from_lexer(rel_fname, fname, code)
     return pre_tags + refs
+
+
+def read_text(filename: str, encoding: str = "utf-8") -> str | None:
+    try:
+        with open(str(filename), "r", encoding=encoding) as f:
+            return f.read()
+    except FileNotFoundError:
+        logging.error(f"{filename}: file not found error")
+        return
+    except IsADirectoryError:
+        logging.error(f"{filename}: is a directory")
+        return
+    except UnicodeError as e:
+        logging.error(f"{filename}: {e}")
+        logging.error("Use encoding parameter to set the unicode encoding.")
+        return

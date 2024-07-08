@@ -4,18 +4,17 @@ import random
 import sys
 import warnings
 from typing import List
-import logging
 
 from pathlib import Path
 
 import networkx as nx
-from grep_ast import TreeContext
 from tqdm import tqdm
 
 
-from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
+from aider.codemap.parse import get_tags_raw, Tag, read_text  # noqa: F402
 from aider.codemap.graph import rank_tags, rank_tags_directly, build_tag_graph  # noqa: F402
 from aider.codemap.file_group import FileGroup, find_src_files
+from aider.codemap.render import RenderCode
 from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
@@ -56,6 +55,7 @@ class RepoMap:
         self.token_count = main_model.token_count
         self.repo_content_prefix = repo_content_prefix
         self.file_group = file_group
+        self.code_renderer = RenderCode(text_encoding=self.io.encoding)
 
     def get_repo_map(self, chat_files, other_files, mentioned_fnames=None, mentioned_idents=None):
         if self.max_map_tokens <= 0:
@@ -107,11 +107,6 @@ class RepoMap:
 
         return repo_content
 
-    def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
-        clean_fnames = self.file_group.validate_fnames(fnames)
-        tags = sum([self.get_tags(fname) for fname in clean_fnames], [])
-        return build_tag_graph(tags)
-
     def get_tag(self, fname: str, line_no: int, tag_graph: nx.MultiDiGraph):
         files = [f for f in self.file_group.get_all_filenames() if fname in f]
         for node in tag_graph.nodes:
@@ -120,49 +115,33 @@ class RepoMap:
                     return node
         return None
 
-    # def split_path(self, path):
-    #     path = os.path.relpath(path, self.root)
-    #     return [path + ":"]
+    def get_tag_representation(self, tag: Tag, tag_graph: nx.MultiDiGraph) -> str:
+        if tag is None:
+            return None
+        if tag not in tag_graph.nodes:
+            raise ValueError(f"The tag {tag} is not in the tag graph")
+        children = []
+        for c in tag_graph.successors(tag):
+            if (  # If the child is included in the parent's full text anyway, skip it
+                c.fname == tag.fname
+                and c.byte_range[0] >= tag.byte_range[0]
+                and c.byte_range[1] <= tag.byte_range[1]
+            ):
+                continue
+            children.append(c)
 
-    # def load_tags_cache(self):
-    #     path = Path(self.root) / self.TAGS_CACHE_DIR
-    #     if not path.exists():
-    #         self.cache_missing = True
-    #     self.TAGS_CACHE = Cache(path)
-    #
-    # def save_tags_cache(self):
-    #     pass
-    #
-    # def get_mtime(self, fname):
-    #     try:
-    #         return os.path.getmtime(fname)
-    #     except FileNotFoundError:
-    #         self.io.tool_error(f"File not found error: {fname}")
+        children_str = self.code_renderer.to_tree(children)
+        out = "\n".join([tag.rel_fname, tag.text, "Referenced entities summary:", children_str])
+        return out
 
-    # def get_tags(self, fname, rel_fname):
-    #     # Check if the file is in the cache and if the modification time has not changed
-    #     # TODO: this should be a decorator?
-    #     file_mtime = self.get_mtime(fname)
-    #     if file_mtime is None:
-    #         return []
-    #
-    #     cache_key = fname
-    #     if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key]["mtime"] == file_mtime:
-    #         return self.TAGS_CACHE[cache_key]["data"]
-    #
-    #     # miss!
-    #     code = self.io.read_text(fname)
-    #     data = get_tags_raw(fname, rel_fname, code)
-    #     assert isinstance(data, list)
-    #
-    #     # Update the cache
-    #     self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
-    #     self.save_tags_cache()
-    #     return data
+    def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
+        clean_fnames = self.file_group.validate_fnames(fnames)
+        tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
+        return build_tag_graph(tags)
 
-    def get_tags(self, fname):
+    def tags_from_filename(self, fname):
         def get_tags_raw_function(fname):
-            code = self.io.read_text(fname)
+            code = read_text(fname, self.io.encoding)
             rel_fname = self.file_group.get_rel_fname(fname)
             data = get_tags_raw(fname, rel_fname, code)
             assert isinstance(data, list)
@@ -252,7 +231,7 @@ class RepoMap:
 
         while lower_bound <= upper_bound:
             used_tags = [tag for tag in ranked_tags[:middle] if tag[0] not in chat_rel_fnames]
-            tree = self.to_tree(used_tags)
+            tree = self.code_renderer.to_tree(used_tags)
             num_tokens = self.token_count(tree)
 
             if num_tokens < max_map_tokens and num_tokens > best_tree_tokens:
@@ -269,74 +248,6 @@ class RepoMap:
         return best_tree
 
     # tree_cache = dict()
-
-    def render_tree(self, abs_fname, rel_fname, lois, line_number: bool = True) -> str:
-        key = (rel_fname, tuple(sorted(lois)))
-
-        if key in self.tree_cache:
-            return self.tree_cache[key]
-
-        code = self.io.read_text(abs_fname) or ""
-        if not code.endswith("\n"):
-            code += "\n"
-
-        context = TreeContext(
-            rel_fname,
-            code,
-            color=False,
-            line_number=True,
-            child_context=False,
-            last_line=False,
-            margin=0,
-            mark_lois=False,
-            loi_pad=0,
-            # header_max=30,
-            show_top_of_file_parent_scope=False,
-        )
-
-        context.add_lines_of_interest(lois)
-        context.add_context()
-        res = context.format()
-        self.tree_cache[key] = res
-        return res
-
-    def to_tree(self, tags: List[Tag | tuple]) -> str:
-        if not tags:
-            return ""
-
-        tags = sorted(tags, key=lambda x: tuple(x))
-
-        cur_fname = None
-        cur_abs_fname = None
-        lois = None
-        output = ""
-
-        # add a bogus tag at the end so we trip the this_fname != cur_fname...
-        dummy_tag = (None,)
-        for tag in tags + [dummy_tag]:
-            this_rel_fname = tag[0]
-
-            # ... here ... to output the final real entry in the list
-            if this_rel_fname != cur_fname:
-                if lois is not None:
-                    output += "\n"
-                    output += cur_fname + ":\n"
-                    output += self.render_tree(cur_abs_fname, cur_fname, lois)
-                    lois = None
-                elif cur_fname:
-                    output += "\n" + cur_fname + "\n"
-                if type(tag) is Tag:
-                    lois = []
-                    cur_abs_fname = tag.fname
-                cur_fname = this_rel_fname
-
-            if lois is not None:
-                lois.append(tag.line)
-
-        # truncate long lines, in case we get minified js or something else crazy
-        output = "\n".join([line[:100] for line in output.splitlines()]) + "\n"
-
-        return output
 
 
 def get_random_color():
