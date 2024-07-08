@@ -28,6 +28,7 @@ from aider.repo import GitRepo
 from aider.codemap.repomap import RepoMap
 from aider.sendchat import send_with_retries
 from aider.utils import format_content, format_messages, is_image_file
+from aider.codemap.file_group import FileGroup
 from ..dump import dump  # noqa: F401
 
 
@@ -304,8 +305,11 @@ class Coder:
             self.abs_fnames.add(fname)
             self.check_added_files()
 
-        if not self.repo:
+        if self.repo is not None:
+            file_group = FileGroup(self.repo)
+        else:
             self.find_common_root()
+            file_group = FileGroup(None, self.root)
 
         if main_model.use_repo_map and self.repo and self.gpt_prompts.repo_content_prefix:
             self.repo_map = RepoMap(
@@ -316,6 +320,7 @@ class Coder:
                 self.gpt_prompts.repo_content_prefix,
                 self.verbose,
                 self.main_model.info.get("max_input_tokens"),
+                file_group=file_group,
             )
 
         if max_chat_history_tokens is None:

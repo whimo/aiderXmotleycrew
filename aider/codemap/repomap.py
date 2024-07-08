@@ -4,17 +4,18 @@ import random
 import sys
 import warnings
 from typing import List
+import logging
 
 from pathlib import Path
 
 import networkx as nx
-from diskcache import Cache
 from grep_ast import TreeContext
 from tqdm import tqdm
 
 
 from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
 from aider.codemap.graph import rank_tags, rank_tags_directly, build_tag_graph  # noqa: F402
+from aider.codemap.file_group import FileGroup, find_src_files
 from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
@@ -38,6 +39,7 @@ class RepoMap:
         repo_content_prefix=None,
         verbose=False,
         max_context_window=None,
+        file_group: FileGroup = None,
     ):
         self.io = io
         self.verbose = verbose
@@ -46,13 +48,14 @@ class RepoMap:
             root = os.getcwd()
         self.root = root
 
-        self.load_tags_cache()
+        # self.load_tags_cache()
 
         self.max_map_tokens = map_tokens
         self.max_context_window = max_context_window
 
         self.token_count = main_model.token_count
         self.repo_content_prefix = repo_content_prefix
+        self.file_group = file_group
 
     def get_repo_map(self, chat_files, other_files, mentioned_fnames=None, mentioned_idents=None):
         if self.max_map_tokens <= 0:
@@ -104,74 +107,68 @@ class RepoMap:
 
         return repo_content
 
-    def validate_fnames(self, fnames: List[str]) -> List[str]:
-        cleaned_fnames = []
-        for fname in fnames:
-            # TODO: skip files that are obviously not source code, eg .zip files
-            if Path(fname).is_file():
-                cleaned_fnames.append(fname)
-            else:
-                if fname not in self.warned_files:
-                    if Path(fname).exists():
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it is not a normal file"
-                        )
-                    else:
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it doesn't exist (anymore?)"
-                        )
-
-                self.warned_files.add(fname)
-
-        return cleaned_fnames
-
     def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
-        clean_fnames = self.validate_fnames(fnames)
-        tags = sum([self.get_tags(fname, self.get_rel_fname(fname)) for fname in clean_fnames], [])
+        clean_fnames = self.file_group.validate_fnames(fnames)
+        tags = sum([self.get_tags(fname) for fname in clean_fnames], [])
         return build_tag_graph(tags)
 
-    def get_rel_fname(self, fname):
-        return os.path.relpath(fname, self.root)
+    def get_tag(self, fname: str, line_no: int, tag_graph: nx.MultiDiGraph):
+        files = [f for f in self.file_group.get_all_filenames() if fname in f]
+        for node in tag_graph.nodes:
+            if node.fname in files:
+                if node.line == line_no - 1:
+                    return node
+        return None
 
-    def split_path(self, path):
-        path = os.path.relpath(path, self.root)
-        return [path + ":"]
+    # def split_path(self, path):
+    #     path = os.path.relpath(path, self.root)
+    #     return [path + ":"]
 
-    def load_tags_cache(self):
-        path = Path(self.root) / self.TAGS_CACHE_DIR
-        if not path.exists():
-            self.cache_missing = True
-        self.TAGS_CACHE = Cache(path)
+    # def load_tags_cache(self):
+    #     path = Path(self.root) / self.TAGS_CACHE_DIR
+    #     if not path.exists():
+    #         self.cache_missing = True
+    #     self.TAGS_CACHE = Cache(path)
+    #
+    # def save_tags_cache(self):
+    #     pass
+    #
+    # def get_mtime(self, fname):
+    #     try:
+    #         return os.path.getmtime(fname)
+    #     except FileNotFoundError:
+    #         self.io.tool_error(f"File not found error: {fname}")
 
-    def save_tags_cache(self):
-        pass
+    # def get_tags(self, fname, rel_fname):
+    #     # Check if the file is in the cache and if the modification time has not changed
+    #     # TODO: this should be a decorator?
+    #     file_mtime = self.get_mtime(fname)
+    #     if file_mtime is None:
+    #         return []
+    #
+    #     cache_key = fname
+    #     if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key]["mtime"] == file_mtime:
+    #         return self.TAGS_CACHE[cache_key]["data"]
+    #
+    #     # miss!
+    #     code = self.io.read_text(fname)
+    #     data = get_tags_raw(fname, rel_fname, code)
+    #     assert isinstance(data, list)
+    #
+    #     # Update the cache
+    #     self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
+    #     self.save_tags_cache()
+    #     return data
 
-    def get_mtime(self, fname):
-        try:
-            return os.path.getmtime(fname)
-        except FileNotFoundError:
-            self.io.tool_error(f"File not found error: {fname}")
+    def get_tags(self, fname):
+        def get_tags_raw_function(fname):
+            code = self.io.read_text(fname)
+            rel_fname = self.file_group.get_rel_fname(fname)
+            data = get_tags_raw(fname, rel_fname, code)
+            assert isinstance(data, list)
+            return data
 
-    def get_tags(self, fname, rel_fname):
-        # Check if the file is in the cache and if the modification time has not changed
-        # TODO: this should be a decorator?
-        file_mtime = self.get_mtime(fname)
-        if file_mtime is None:
-            return []
-
-        cache_key = fname
-        if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key]["mtime"] == file_mtime:
-            return self.TAGS_CACHE[cache_key]["data"]
-
-        # miss!
-        code = self.io.read_text(fname)
-        data = get_tags_raw(fname, rel_fname, code)
-        assert isinstance(data, list)
-
-        # Update the cache
-        self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
-        self.save_tags_cache()
-        return data
+        return self.file_group.cached_function_call(fname, get_tags_raw_function)
 
     def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
 
@@ -192,14 +189,15 @@ class RepoMap:
             fnames = tqdm(fnames)
         self.cache_missing = False
 
-        cleaned = self.validate_fnames(fnames)
+        cleaned = self.file_group.validate_fnames(fnames)
 
         # All the source code parsing happens here
         tag_graph = self.get_tag_graph(cleaned)
         tags = list(tag_graph.nodes)
 
         # this constructs the graph and ranks the tags based on it
-        other_rel_fnames = [self.get_rel_fname(fname) for fname in other_fnames]
+        other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
+
         reranked_tags = rank_tags_directly(
             tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
         )
@@ -245,7 +243,7 @@ class RepoMap:
         best_tree = None
         best_tree_tokens = 0
 
-        chat_rel_fnames = [self.get_rel_fname(fname) for fname in chat_fnames]
+        chat_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in chat_fnames]
 
         # Guess a small starting number to help with giant repos
         middle = min(max_map_tokens // 25, num_tags)
@@ -339,17 +337,6 @@ class RepoMap:
         output = "\n".join([line[:100] for line in output.splitlines()]) + "\n"
 
         return output
-
-
-def find_src_files(directory):
-    if not os.path.isdir(directory):
-        return [directory]
-
-    src_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            src_files.append(os.path.join(root, file))
-    return src_files
 
 
 def get_random_color():
