@@ -177,9 +177,6 @@ class RepoMap:
         # this constructs the graph and ranks the tags based on it
         other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
 
-        reranked_tags = rank_tags_directly(
-            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
-        )
         ranked_tags = rank_tags(
             tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
         )
