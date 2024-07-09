@@ -4,7 +4,7 @@ import json
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.prompts import SystemMessagePromptTemplate
 
-from .editblock_prompts import EditBlockPrompts
+from aider.coders.editblock_prompts import EditBlockPrompts
 
 
 class MotleyCrewPrompts(EditBlockPrompts):
