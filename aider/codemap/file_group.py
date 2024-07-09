@@ -65,7 +65,8 @@ class FileGroup:
     def validate_fnames(self, fnames: List[str]) -> List[str]:
         cleaned_fnames = []
         for fname in fnames:
-            # TODO: skip files that are obviously not source code, eg .zip files
+            if not self.filename_filter(str(fname)):
+                continue
             if Path(fname).is_file():
                 cleaned_fnames.append(str(fname))
             else:

@@ -152,8 +152,10 @@ class RepoMap:
             )
         return "\n".join(out)
 
-    def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
-        clean_fnames = self.file_group.validate_fnames(fnames)
+    def get_tag_graph(self, abs_fnames: List[str] | None = None) -> nx.MultiDiGraph:
+        if not abs_fnames:
+            abs_fnames = self.file_group.get_all_filenames()
+        clean_fnames = self.file_group.validate_fnames(abs_fnames)
         tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
         return build_tag_graph(tags)
 
