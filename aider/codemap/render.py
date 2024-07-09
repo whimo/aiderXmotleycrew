@@ -78,3 +78,11 @@ class RenderCode:
         res = context.format()
         self.tree_cache[key] = res
         return res
+
+    @staticmethod
+    def text_with_line_numbers(t: Tag) -> str:
+        out = []
+        for i, line in enumerate(t.text.split("\n")):
+            re_line = f"{i+1+t.line:3}│{line}"
+            out.append(re_line)
+        return "\n".join(out)

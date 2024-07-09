@@ -3,7 +3,7 @@ import os
 import random
 import sys
 import warnings
-from typing import List
+from typing import List, Set
 
 from pathlib import Path
 
@@ -13,7 +13,12 @@ from tqdm import tqdm
 
 from aider.codemap.parse import get_tags_raw, Tag, read_text  # noqa: F402
 from aider.codemap.graph import rank_tags, rank_tags_directly, build_tag_graph  # noqa: F402
-from aider.codemap.file_group import FileGroup, find_src_files
+from aider.codemap.file_group import (
+    FileGroup,
+    find_src_files,
+    get_ident_mentions,
+    get_ident_filename_matches,
+)
 from aider.codemap.render import RenderCode
 from aider.dump import dump  # noqa: F402,E402
 
@@ -57,7 +62,14 @@ class RepoMap:
         self.file_group = file_group
         self.code_renderer = RenderCode(text_encoding=self.io.encoding)
 
-    def get_repo_map(self, chat_files, other_files, mentioned_fnames=None, mentioned_idents=None):
+    def get_repo_map(
+        self,
+        chat_files,
+        other_files,
+        mentioned_fnames=None,
+        mentioned_idents=None,
+        add_prefix: bool = True,
+    ):
         if self.max_map_tokens <= 0:
             return
         if not other_files:
@@ -98,7 +110,7 @@ class RepoMap:
         else:
             other = ""
 
-        if self.repo_content_prefix:
+        if self.repo_content_prefix and add_prefix:
             repo_content = self.repo_content_prefix.format(other=other)
         else:
             repo_content = ""
@@ -130,9 +142,15 @@ class RepoMap:
                 continue
             children.append(c)
 
-        children_str = self.code_renderer.to_tree(children)
-        out = "\n".join([tag.rel_fname, tag.text, "Referenced entities summary:", children_str])
-        return out
+        out = [tag.rel_fname + ":", self.code_renderer.text_with_line_numbers(tag)]
+        if children:
+            out.extend(
+                [
+                    "Referenced entities summary:",
+                    self.code_renderer.to_tree(children),
+                ]
+            )
+        return "\n".join(out)
 
     def get_tag_graph(self, fnames: List[str]) -> nx.MultiDiGraph:
         clean_fnames = self.file_group.validate_fnames(fnames)
@@ -245,6 +263,50 @@ class RepoMap:
         return best_tree
 
     # tree_cache = dict()
+
+    def repo_map_from_message(
+        self, message: str, abs_added_fnames: Set[str] | None = None, add_prefix: bool = False
+    ) -> str:
+        if not abs_added_fnames:
+            abs_added_fnames = set()
+
+        cur_msg_text = message
+        all_files = self.file_group.get_all_filenames()
+        other_files = set(all_files) - set(abs_added_fnames)
+
+        mentioned_fnames = self.file_group.get_file_mentions(cur_msg_text, abs_added_fnames)
+        mentioned_idents = get_ident_mentions(cur_msg_text)
+
+        all_rel_fnames = [self.file_group.get_rel_fname(f) for f in all_files]
+        mentioned_fnames.update(get_ident_filename_matches(mentioned_idents, all_rel_fnames))
+
+        repo_content = self.get_repo_map(
+            abs_added_fnames,
+            other_files,
+            mentioned_fnames=mentioned_fnames,
+            mentioned_idents=mentioned_idents,
+            add_prefix=add_prefix,
+        )
+
+        # fall back to global repo map if files in chat are disjoint from rest of repo
+        if not repo_content:
+            repo_content = self.get_repo_map(
+                set(),
+                set(all_files),
+                mentioned_fnames=mentioned_fnames,
+                mentioned_idents=mentioned_idents,
+                add_prefix=add_prefix,
+            )
+
+        # fall back to completely unhinted repo
+        if not repo_content:
+            repo_content = self.get_repo_map(
+                set(),
+                set(all_files),
+                add_prefix=add_prefix,
+            )
+
+        return repo_content
 
 
 def get_random_color():
