@@ -10,9 +10,12 @@ from pathlib import Path
 import networkx as nx
 from tqdm import tqdm
 
+from langchain_core.pydantic_v1 import BaseModel, Field
 
-from aider.codemap.parse import get_tags_raw, Tag, read_text  # noqa: F402
-from aider.codemap.graph import rank_tags, rank_tags_directly, build_tag_graph  # noqa: F402
+from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
+from aider.codemap.tag import Tag
+from aider.codemap.graph import rank_tags, TagGraph, build_tag_graph  # noqa: F402
+from aider.codemap.rank_new import rank_tags_new  # noqa: F402
 from aider.codemap.file_group import (
     FileGroup,
     find_src_files,
@@ -69,6 +72,7 @@ class RepoMap:
         mentioned_fnames=None,
         mentioned_idents=None,
         add_prefix: bool = True,
+        search_terms: Set[str] | None = None,
     ):
         if self.max_map_tokens <= 0:
             return
@@ -91,7 +95,12 @@ class RepoMap:
 
         try:
             files_listing = self.get_ranked_tags_map(
-                chat_files, other_files, self.max_map_tokens, mentioned_fnames, mentioned_idents
+                chat_files,
+                other_files,
+                self.max_map_tokens,
+                mentioned_fnames,
+                mentioned_idents,
+                search_terms,
             )
         except RecursionError:
             self.io.tool_error("Disabling repo map, git repo too large?")
@@ -119,45 +128,12 @@ class RepoMap:
 
         return repo_content
 
-    def get_tag(self, fname: str, line_no: int, tag_graph: nx.MultiDiGraph):
-        files = [f for f in self.file_group.get_all_filenames() if fname in f]
-        for node in tag_graph.nodes:
-            if node.fname in files:
-                if node.line == line_no - 1:
-                    return node
-        return None
-
-    def get_tag_representation(self, tag: Tag, tag_graph: nx.MultiDiGraph) -> str:
-        if tag is None:
-            return None
-        if tag not in tag_graph.nodes:
-            raise ValueError(f"The tag {tag} is not in the tag graph")
-        children = []
-        for c in tag_graph.successors(tag):
-            if (  # If the child is included in the parent's full text anyway, skip it
-                c.fname == tag.fname
-                and c.byte_range[0] >= tag.byte_range[0]
-                and c.byte_range[1] <= tag.byte_range[1]
-            ):
-                continue
-            children.append(c)
-
-        out = [tag.rel_fname + ":", self.code_renderer.text_with_line_numbers(tag)]
-        if children:
-            out.extend(
-                [
-                    "Referenced entities summary:",
-                    self.code_renderer.to_tree(children),
-                ]
-            )
-        return "\n".join(out)
-
-    def get_tag_graph(self, abs_fnames: List[str] | None = None) -> nx.MultiDiGraph:
+    def get_tag_graph(self, abs_fnames: List[str] | None = None) -> TagGraph:
         if not abs_fnames:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
         tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
-        return build_tag_graph(tags)
+        return build_tag_graph(tags, self.code_renderer.encoding)
 
     def tags_from_filename(self, fname):
         def get_tags_raw_function(fname):
@@ -167,9 +143,13 @@ class RepoMap:
             assert isinstance(data, list)
             return data
 
+        # return get_tags_raw_function(fname)
+        # # TODO: resume caching
         return self.file_group.cached_function_call(fname, get_tags_raw_function)
 
-    def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
+    def get_ranked_tags(
+        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
+    ):
 
         # Check file names for validity
         fnames = sorted(set(chat_fnames).union(set(other_fnames)))
@@ -194,12 +174,21 @@ class RepoMap:
         tag_graph = self.get_tag_graph(cleaned)
         tags = list(tag_graph.nodes)
 
-        # this constructs the graph and ranks the tags based on it
         other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
 
-        ranked_tags = rank_tags(
-            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+        # this constructs the graph and ranks the tags based on it
+        # ranked_tags = rank_tags(
+        #     tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+        # )
+        ranked_tags = rank_tags_new(
+            tag_graph,
+            mentioned_fnames,
+            mentioned_idents,
+            chat_fnames,
+            other_rel_fnames,
+            search_terms,
         )
+
         return ranked_tags
 
     def get_ranked_tags_map(
@@ -209,6 +198,7 @@ class RepoMap:
         max_map_tokens=None,
         mentioned_fnames=None,
         mentioned_idents=None,
+        search_terms=None,
     ):
         """
         Does a binary search over the number of tags to include in the map,
@@ -228,9 +218,11 @@ class RepoMap:
             mentioned_fnames = set()
         if not mentioned_idents:
             mentioned_idents = set()
+        if not search_terms:
+            search_terms = set()
 
         ranked_tags = self.get_ranked_tags(
-            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents
+            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
         )
 
         num_tags = len(ranked_tags)
@@ -267,10 +259,19 @@ class RepoMap:
     # tree_cache = dict()
 
     def repo_map_from_message(
-        self, message: str, abs_added_fnames: Set[str] | None = None, add_prefix: bool = False
+        self,
+        message: str,
+        abs_added_fnames: Set[str] | None = None,
+        add_prefix: bool = False,
+        llm=None,
     ) -> str:
         if not abs_added_fnames:
             abs_added_fnames = set()
+
+        if llm is not None:
+            search_terms = search_terms_from_message(message, llm)
+        else:
+            search_terms = set()
 
         cur_msg_text = message
         all_files = self.file_group.get_all_filenames()
@@ -288,6 +289,7 @@ class RepoMap:
             mentioned_fnames=mentioned_fnames,
             mentioned_idents=mentioned_idents,
             add_prefix=add_prefix,
+            search_terms=search_terms,
         )
 
         # fall back to global repo map if files in chat are disjoint from rest of repo
@@ -298,6 +300,7 @@ class RepoMap:
                 mentioned_fnames=mentioned_fnames,
                 mentioned_idents=mentioned_idents,
                 add_prefix=add_prefix,
+                search_terms=search_terms,
             )
 
         # fall back to completely unhinted repo
@@ -306,9 +309,37 @@ class RepoMap:
                 set(),
                 set(all_files),
                 add_prefix=add_prefix,
+                search_terms=search_terms,
             )
 
         return repo_content
+
+
+def search_terms_from_message(message: str, llm) -> Set[str]:
+    search_prompt = f"""You are an expert bug fixer. You are given a bug report. 
+        Return a JSON list of at most 10 strings extracted from the bug report, that should be used
+        in a full-text search of the codebase to find the part of the code that needs to be modified. 
+        Select at most 10 strings that are most likely to be unique to the part of the code that needs to be modified.
+        ONLY extract strings that you could expect to find verbatim in the code, especially function names,
+        class names, and error messages. 
+        For method calls, such as `foo.bar()`, extract `.bar(` 
+
+        For error messages, extract the bits of the error message that are likely to be found VERBATIM in the code, 
+        for example "File not found: " rather than "File not found: /amger/gae/doc.tcx"; 
+        return "A string is required" rather than "A string is required, not 'MyWeirdClassName'".
+
+        Here is the problem description:
+        {message}"""
+
+    class ListOfStrings(BaseModel):
+        strings: List[str] = Field(
+            description="List of full-text search strings to find the part of the code that needs to be modified."
+        )
+
+    out = llm.with_structured_output(ListOfStrings).invoke(search_prompt)
+    re_out = [x.split(".")[-1] for x in out.strings]
+    re_out = sum([x.split(",") for x in re_out], [])
+    return set(re_out)
 
 
 def get_random_color():

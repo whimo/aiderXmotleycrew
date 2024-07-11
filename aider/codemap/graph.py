@@ -3,7 +3,10 @@ from collections import defaultdict, Counter
 
 import networkx as nx
 
-from aider.codemap.parse import Tag
+from motleycrew.common import logger
+
+from aider.codemap.tag import Tag
+from aider.codemap.render import RenderCode
 
 
 def rank_tags(
@@ -13,6 +16,15 @@ def rank_tags(
     chat_fnames: List[str],
     other_rel_fnames: List[str],
 ) -> List[tuple]:
+    """
+    The original aider ranking algorithm
+    :param tags:
+    :param mentioned_fnames:
+    :param mentioned_idents:
+    :param chat_fnames:
+    :param other_rel_fnames:
+    :return:
+    """
     defines = defaultdict(set)
     references = defaultdict(list)
     definitions = defaultdict(set)
@@ -116,20 +128,113 @@ def rank_tags(
     return ranked_tags
 
 
-def rank_tags_directly(
-    tags: List[Tag],
-    mentioned_fnames: List[str],
-    mentioned_idents: List[str],
-    chat_fnames: List[str],
-    other_rel_fnames: List[str],
-) -> List[Tag]:
-    graph = build_tag_graph(tags)
+class TagGraph(nx.MultiDiGraph):
+    def __init__(self, encoding: str):
+        super().__init__()
+        self.code_renderer = RenderCode(text_encoding=encoding)
 
-    # overweight mentioned indents: defs and refs?
-    # overweight chat files and mentioned files?
+    @property
+    def filenames(self):
+        return set([tag.fname for tag in self.nodes])
+
+    def get_tag_representation(self, tag: Tag) -> str:
+        if tag is None:
+            return None
+        if tag not in self.nodes:
+            raise ValueError(f"The tag {tag} is not in the tag graph")
+
+        tag_repr = "\n".join([tag.rel_fname + ":", RenderCode.text_with_line_numbers(tag)])
+
+        if len(tag_repr.split("\n")) <= 30:
+            # if the full text hast at most 50 lines, put it all in the summary
+            children = []
+            for c in self.successors(tag):
+                if (  # If the child is included in the parent's full text anyway, skip it
+                    c.fname == tag.fname
+                    and c.byte_range[0] >= tag.byte_range[0]
+                    and c.byte_range[1] <= tag.byte_range[1]
+                ):
+                    continue
+                children.append(c)
+
+            out = [tag_repr]
+            if children:
+                out.extend(
+                    [
+                        "Referenced entities summary:",
+                        self.code_renderer.to_tree(children),
+                    ]
+                )
+            return "\n".join(out)
+        else:
+            # if the full text is too long, send a summary of it and its children
+            children = list(self.successors(tag))
+            tag_repr = self.code_renderer.to_tree([tag] + children)
+            return tag_repr
+
+    def get_tag_from_filename_lineno(
+        self, fname: str, line_no: int, try_next_line=True
+    ) -> Tag | None:
+        files = [f for f in self.filenames if fname in f]
+        if not files:
+            raise ValueError(f"File {fname} not found in the file group")
+        this_file_nodes = [node for node in self.nodes if node.fname in files]
+        if not this_file_nodes:
+            raise ValueError(f"File {fname} not found in the tag graph")
+        for node in this_file_nodes:
+            if node.line == line_no - 1:
+                return node
+        # If we got this far, we didn't find the tag
+        # Let's look in the next line, sometimes that works
+        if try_next_line:
+            return self.get_tag_from_filename_lineno(fname, line_no + 1, try_next_line=False)
+
+        return None
+
+    def get_tags_from_entity_name(self, entity_name: str) -> List[Tag]:
+
+        orig_tags: List[Tag] = [
+            t for t in self.nodes if t.name == entity_name.split(".")[-1] and t.kind == "def"
+        ]
+
+        # do fancier name resolution
+        re_tags = [t for t in orig_tags if match_entity_name(entity_name, t)]
+
+        if len(re_tags) > 1:
+            logger.warning(f"Multiple definitions found for {entity_name}: {re_tags}")
+        return re_tags
 
 
-def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:
+def match_entity_name(entity_name: str, tag: Tag) -> bool:
+    entity_name = entity_name.split(".")
+    if entity_name[-1] != tag.name:
+        return False
+
+    # Simple reference, with no dots, and names are the same
+    # or the tag has no parent names, and the dots are just package names
+    if len(entity_name) == 1 or len(tag.parent_names) == 0:
+        return True
+
+    # Check if the parent names match if they exist
+    if tag.parent_names == tuple((entity_name[:-1])[-len(tag.parent_names) :]):
+        return True
+
+    # TODO: do fancier resolution here, potentially returning match scores to rank matches
+
+    # If entity name includes package name, check that
+    fn_parts = tag.fname.split("/")
+    fn_parts[-1] = fn_parts[-1].replace(".py", "")
+
+    potential_parents = fn_parts + list(tag.parent_names)
+    clipped_parents = potential_parents[-len(entity_name) - 1 :]
+
+    if tuple(clipped_parents) == tuple(entity_name[:-1]):
+        return True
+
+    return False
+
+
+def build_tag_graph(tags: List[Tag], text_encoding: str = "utf-8") -> TagGraph:
     """
     Build a graph of tags, with edges from references to definitions
     And with edges from parent definitions to child definitions in the same file
@@ -141,7 +246,7 @@ def build_tag_graph(tags: List[Tag]) -> nx.MultiDiGraph:
         if tag.kind == "def":
             def_map[tag.name].add(tag)
 
-    G = nx.MultiDiGraph()
+    G = TagGraph(text_encoding)
     # Add all tags as nodes
     # Add edges from references to definitions
     for tag in tags:

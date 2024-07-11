@@ -3,7 +3,8 @@ from typing import List
 
 from grep_ast import TreeContext
 
-from aider.codemap.parse import Tag, read_text
+from aider.codemap.parse import read_text
+from aider.codemap.tag import Tag
 
 
 class RenderCode:

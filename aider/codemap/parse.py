@@ -1,6 +1,5 @@
 from typing import List
 import os
-from importlib import resources
 
 from pygments.lexers import guess_lexer_for_filename
 from pygments.token import Token
@@ -12,47 +11,7 @@ from tree_sitter_languages import get_parser  # noqa: E402
 
 import logging
 
-from dataclasses import dataclass
-
-
-@dataclass
-class Tag:
-    rel_fname: str
-    line: int
-    name: str
-    kind: str
-    fname: str
-    text: str
-    byte_range: tuple[int, int]
-    parent_names: tuple[str, ...] = ()
-
-    @property
-    def full_name(self):
-        if self.kind == "ref":
-            return self.name
-        else:
-            return tuple(list(self.parent_names) + [self.name])
-
-    def to_tuple(self):
-        return (
-            self.rel_fname,
-            self.line,
-            self.name,
-            self.kind,
-            self.fname,
-            self.text,
-            self.byte_range,
-            self.parent_names,
-        )
-
-    def __getitem__(self, item):
-        return self.to_tuple()[item]
-
-    def __len__(self):
-        return len(self.to_tuple())
-
-    def __hash__(self):
-        return hash(self.to_tuple())
+from aider.codemap.tag import Tag
 
 
 def get_query(lang: str) -> Query | None:
@@ -99,8 +58,8 @@ def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[T
 
         out.append(
             Tag(
-                rel_fname=rel_fname,
-                fname=fname,
+                rel_fname=rel_fname.replace("\\", "/"),
+                fname=fname.replace("\\", "/"),
                 name=namenode2name(name_node),
                 parent_names=parent_names,
                 kind=kind,
@@ -163,6 +122,8 @@ def refs_from_lexer(rel_fname, fname, code):
             name=token,
             kind="ref",
             line=-1,
+            text="",
+            byte_range=(0, 0),
         )
         for token in tokens
     ]

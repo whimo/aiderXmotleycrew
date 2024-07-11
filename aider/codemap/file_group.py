@@ -10,6 +10,10 @@ from aider.repo import GitRepo
 from diskcache import Cache
 
 
+def python_file_filter(fname: str) -> bool:
+    return fname.endswith(".py") and not "test_" in fname
+
+
 class FileGroup:
     """
     A FileGroup is a collection of files that we are parsing and monitoring for changes.
@@ -32,7 +36,7 @@ class FileGroup:
             self.root = self.repo.root
 
         if filename_filter is None:
-            self.filename_filter = lambda x: x.endswith(".py")
+            self.filename_filter = python_file_filter
         else:
             self.filename_filter = filename_filter
 
@@ -58,7 +62,7 @@ class FileGroup:
         else:
             files = [str(f) for f in Path(self.root).rglob("*") if f.is_file()]
 
-        files = [f for f in files if self.filename_filter(f)]
+        files = [str(f).replace("\\", "/") for f in files if self.filename_filter(f)]
 
         return sorted(set(files))
 
@@ -89,7 +93,7 @@ class FileGroup:
         self.TAGS_CACHE = Cache(str(path))
 
     def get_rel_fname(self, fname):
-        return os.path.relpath(fname, self.root)
+        return os.path.relpath(fname, self.root).replace("\\", "/")
 
     def save_tags_cache(self):
         pass
