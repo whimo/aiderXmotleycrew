@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from collections import defaultdict, Counter
 
 import networkx as nx
@@ -137,13 +137,49 @@ class TagGraph(nx.MultiDiGraph):
     def filenames(self):
         return set([tag.fname for tag in self.nodes])
 
-    def get_tag_representation(self, tag: Tag) -> str:
+    def get_parents(self, tag: Tag) -> List[Tag] | str:
+        """
+        Get the parent tags of a tag in the same file, eg the class def for a method name
+        :param tag:
+        :return: list of parent tags
+        """
+        if not len(tag.parent_names):
+            return []
+
+        parents = [t for t in self.predecessors(tag) if t.kind == "def"]
+        if not parents:
+            logger.warning(f"No parent found for {tag} with nonempty parent names!")
+            return ".".join(tag.parent_names) + "." + tag.name + ":"
+        parent = parents[0]
+
+        if len(parent.parent_names):
+            predecessors = self.get_parents(parent)
+        else:
+            predecessors = []
+
+        return predecessors + [parent]
+
+    def get_tag_representation(self, tag: Tag, parent_details: bool = False) -> str:
         if tag is None:
             return None
         if tag not in self.nodes:
             raise ValueError(f"The tag {tag} is not in the tag graph")
 
-        tag_repr = "\n".join([tag.rel_fname + ":", RenderCode.text_with_line_numbers(tag)])
+        tag_repr = [tag.rel_fname + ":"]
+        if not parent_details:
+            if len(tag.parent_names):
+                tag_repr.append(".".join(tag.parent_names) + "." + tag.name + ":")
+        else:
+            parents = self.get_parents(tag)
+            if parents:
+                if isinstance(parents, str):
+                    tag_repr.append(parents)
+                else:
+                    # if there are parents, this will include the filename
+                    tag_repr = [self.code_renderer.to_tree(parents)]
+
+        tag_repr.append(RenderCode.text_with_line_numbers(tag))
+        tag_repr = "\n".join(tag_repr)
 
         if len(tag_repr.split("\n")) <= 30:
             # if the full text hast at most 50 lines, put it all in the summary
@@ -191,10 +227,30 @@ class TagGraph(nx.MultiDiGraph):
 
         return None
 
-    def get_tags_from_entity_name(self, entity_name: str) -> List[Tag]:
+    def get_tags_from_entity_name(
+        self, entity_name: Optional[str] = None, file_name: Optional[str] = None
+    ) -> List[Tag]:
+
+        if entity_name is None:
+            assert file_name is not None, "Must supply at least one of entity_name, file_name"
+            return [t for t in self.nodes if file_name in t.fname]
+
+        # Composite, like `file.py:method_name`
+        if file_name is not None:
+            preselection: List[Tag] = [t for t in self.nodes if file_name in t.fname]
+            test = [
+                t for t in preselection if t.name == entity_name.split(".")[-1] and t.kind == "def"
+            ]
+            if not test:
+                logger.warning(
+                    f"Definition of entity {entity_name} not found in file {file_name}, searching globally"
+                )
+                preselection: List[Tag] = list(self.nodes)
+        else:
+            preselection: List[Tag] = list(self.nodes)
 
         orig_tags: List[Tag] = [
-            t for t in self.nodes if t.name == entity_name.split(".")[-1] and t.kind == "def"
+            t for t in preselection if t.name == entity_name.split(".")[-1] and t.kind == "def"
         ]
 
         # do fancier name resolution

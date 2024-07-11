@@ -165,16 +165,16 @@ class FileGroup:
         return mentioned_rel_fnames
 
 
-def get_ident_filename_matches(idents, all_rel_fnames: List[str]):
+def get_ident_filename_matches(idents, all_rel_fnames: List[str], max_ident_len=2):
     all_fnames = defaultdict(set)
     for fname in all_rel_fnames:
         base = Path(fname).with_suffix("").name.lower()
-        if len(base) >= 5:
+        if len(base) >= max_ident_len:
             all_fnames[base].add(fname)
 
     matches = set()
     for ident in idents:
-        if len(ident) < 5:
+        if len(ident) < max_ident_len:
             continue
         matches.update(all_fnames[ident.lower()])
 
