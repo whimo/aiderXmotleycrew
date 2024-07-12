@@ -14,8 +14,8 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 
 from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
 from aider.codemap.tag import Tag
-from aider.codemap.graph import rank_tags, TagGraph, build_tag_graph  # noqa: F402
-from aider.codemap.rank_new import rank_tags_new  # noqa: F402
+from aider.codemap.graph import TagGraph, build_tag_graph  # noqa: F402
+from aider.codemap.rank import rank_tags_new, rank_tags  # noqa: F402
 from aider.codemap.file_group import (
     FileGroup,
     find_src_files,
@@ -47,9 +47,11 @@ class RepoMap:
         verbose=False,
         max_context_window=None,
         file_group: FileGroup = None,
+        use_old_ranking: bool = False,
     ):
         self.io = io
         self.verbose = verbose
+        self.use_old_ranking = use_old_ranking
 
         if not root:
             root = os.getcwd()
@@ -175,19 +177,19 @@ class RepoMap:
         tags = list(tag_graph.nodes)
 
         other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
-
-        # this constructs the graph and ranks the tags based on it
-        # ranked_tags = rank_tags(
-        #     tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
-        # )
-        ranked_tags = rank_tags_new(
-            tag_graph,
-            mentioned_fnames,
-            mentioned_idents,
-            chat_fnames,
-            other_rel_fnames,
-            search_terms,
-        )
+        if self.use_old_ranking:
+            ranked_tags = rank_tags(
+                tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+            )
+        else:
+            ranked_tags = rank_tags_new(
+                tag_graph,
+                mentioned_fnames,
+                mentioned_idents,
+                chat_fnames,
+                other_rel_fnames,
+                search_terms,
+            )
 
         return ranked_tags
 
