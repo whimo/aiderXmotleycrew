@@ -1,13 +1,11 @@
-(binary_operator
-    lhs: (identifier) @name
-    operator: "<-"
-    rhs: (function_definition)
+(equals_assignment
+    (identifier) @name
+    (function_definition) @definition.function
 ) @definition.function
 
-(binary_operator
-    lhs: (identifier) @name
-    operator: "="
-    rhs: (function_definition)
+(left_assignment
+    (identifier) @name
+    (function_definition) @definition.function
 ) @definition.function
 
 (call
@@ -15,7 +13,8 @@
 ) @reference.call
 
 (call
-    function: (namespace_operator
-        rhs: (identifier) @name
+    function: (binary
+        left: (identifier)
+        right: (identifier) @name
     )
 ) @reference.call

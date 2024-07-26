@@ -8,7 +8,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda, RunnableConfig
 from langchain_core.tools import render_text_description
 
-from motleycrew.agents import LangchainMotleyAgent, MotleyOutputHandler
+from motleycrew.agents import MotleyOutputHandler
+from motleycrew.agents.langchain import LangchainMotleyAgent
 from motleycrew.common import LLMFramework
 from motleycrew.common.llms import init_llm
 from motleycrew.common.utils import print_passthrough
