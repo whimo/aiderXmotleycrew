@@ -28,6 +28,7 @@ from aider.repo import GitRepo
 from aider.codemap.repomap import RepoMap
 from aider.sendchat import send_with_retries
 from aider.utils import format_content, format_messages, is_image_file
+from aider.codemap.file_group import FileGroup
 from ..dump import dump  # noqa: F401
 
 
@@ -304,8 +305,11 @@ class Coder:
             self.abs_fnames.add(fname)
             self.check_added_files()
 
-        if not self.repo:
+        if self.repo is not None:
+            file_group = FileGroup(self.repo)
+        else:
             self.find_common_root()
+            file_group = FileGroup(None, self.root)
 
         if main_model.use_repo_map and self.repo and self.gpt_prompts.repo_content_prefix:
             self.repo_map = RepoMap(
@@ -316,6 +320,7 @@ class Coder:
                 self.gpt_prompts.repo_content_prefix,
                 self.verbose,
                 self.main_model.info.get("max_input_tokens"),
+                file_group=file_group,
             )
 
         if max_chat_history_tokens is None:
@@ -467,11 +472,11 @@ class Coder:
             text += msg["content"] + "\n"
         return text
 
-    def get_ident_mentions(self, text):
-        # Split the string on any character that is not alphanumeric
-        # \W+ matches one or more non-word characters (equivalent to [^a-zA-Z0-9_]+)
-        words = set(re.split(r"\W+", text))
-        return words
+    # def get_ident_mentions(self, text):
+    #     # Split the string on any character that is not alphanumeric
+    #     # \W+ matches one or more non-word characters (equivalent to [^a-zA-Z0-9_]+)
+    #     words = set(re.split(r"\W+", text))
+    #     return words
 
     def get_ident_filename_matches(self, idents):
         all_fnames = defaultdict(set)
@@ -493,36 +498,39 @@ class Coder:
             return
 
         cur_msg_text = self.get_cur_message_text()
-        mentioned_fnames = self.get_file_mentions(cur_msg_text)
-        mentioned_idents = self.get_ident_mentions(cur_msg_text)
+        abs_added_fnames = self.abs_fnames
+        return self.repo_map.repo_map_from_message(cur_msg_text, abs_added_fnames, add_prefix=True)
 
-        mentioned_fnames.update(self.get_ident_filename_matches(mentioned_idents))
-
-        other_files = set(self.get_all_abs_files()) - set(self.abs_fnames)
-        repo_content = self.repo_map.get_repo_map(
-            self.abs_fnames,
-            other_files,
-            mentioned_fnames=mentioned_fnames,
-            mentioned_idents=mentioned_idents,
-        )
-
-        # fall back to global repo map if files in chat are disjoint from rest of repo
-        if not repo_content:
-            repo_content = self.repo_map.get_repo_map(
-                set(),
-                set(self.get_all_abs_files()),
-                mentioned_fnames=mentioned_fnames,
-                mentioned_idents=mentioned_idents,
-            )
-
-        # fall back to completely unhinted repo
-        if not repo_content:
-            repo_content = self.repo_map.get_repo_map(
-                set(),
-                set(self.get_all_abs_files()),
-            )
-
-        return repo_content
+        # mentioned_fnames = self.get_file_mentions(cur_msg_text)
+        # mentioned_idents = self.get_ident_mentions(cur_msg_text)
+        #
+        # mentioned_fnames.update(self.get_ident_filename_matches(mentioned_idents))
+        #
+        # other_files = set(self.get_all_abs_files()) - set(self.abs_fnames)
+        # repo_content = self.repo_map.get_repo_map(
+        #     self.abs_fnames,
+        #     other_files,
+        #     mentioned_fnames=mentioned_fnames,
+        #     mentioned_idents=mentioned_idents,
+        # )
+        #
+        # # fall back to global repo map if files in chat are disjoint from rest of repo
+        # if not repo_content:
+        #     repo_content = self.repo_map.get_repo_map(
+        #         set(),
+        #         set(self.get_all_abs_files()),
+        #         mentioned_fnames=mentioned_fnames,
+        #         mentioned_idents=mentioned_idents,
+        #     )
+        #
+        # # fall back to completely unhinted repo
+        # if not repo_content:
+        #     repo_content = self.repo_map.get_repo_map(
+        #         set(),
+        #         set(self.get_all_abs_files()),
+        #     )
+        #
+        # return repo_content
 
     def get_files_messages(self):
         files_messages = []

@@ -3,17 +3,26 @@ import os
 import random
 import sys
 import warnings
-from typing import List
+from typing import List, Set
 
 from pathlib import Path
 
-from diskcache import Cache
-from grep_ast import TreeContext
+import networkx as nx
 from tqdm import tqdm
 
+from langchain_core.pydantic_v1 import BaseModel, Field
 
-from aider.codemap.parse import Tag, get_tags_raw  # noqa: F402
-from aider.codemap.graph import rank_tags, rank_tags_directly  # noqa: F402
+from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
+from aider.codemap.tag import Tag
+from aider.codemap.graph import TagGraph, build_tag_graph  # noqa: F402
+from aider.codemap.rank import rank_tags_new, rank_tags  # noqa: F402
+from aider.codemap.file_group import (
+    FileGroup,
+    find_src_files,
+    get_ident_mentions,
+    get_ident_filename_matches,
+)
+from aider.codemap.render import RenderCode
 from aider.dump import dump  # noqa: F402,E402
 
 # tree_sitter is throwing a FutureWarning
@@ -37,23 +46,36 @@ class RepoMap:
         repo_content_prefix=None,
         verbose=False,
         max_context_window=None,
+        file_group: FileGroup = None,
+        use_old_ranking: bool = False,
     ):
         self.io = io
         self.verbose = verbose
+        self.use_old_ranking = use_old_ranking
 
         if not root:
             root = os.getcwd()
         self.root = root
 
-        self.load_tags_cache()
+        # self.load_tags_cache()
 
         self.max_map_tokens = map_tokens
         self.max_context_window = max_context_window
 
         self.token_count = main_model.token_count
         self.repo_content_prefix = repo_content_prefix
+        self.file_group = file_group
+        self.code_renderer = RenderCode(text_encoding=self.io.encoding)
 
-    def get_repo_map(self, chat_files, other_files, mentioned_fnames=None, mentioned_idents=None):
+    def get_repo_map(
+        self,
+        chat_files,
+        other_files,
+        mentioned_fnames=None,
+        mentioned_idents=None,
+        add_prefix: bool = True,
+        search_terms: Set[str] | None = None,
+    ):
         if self.max_map_tokens <= 0:
             return
         if not other_files:
@@ -75,7 +97,12 @@ class RepoMap:
 
         try:
             files_listing = self.get_ranked_tags_map(
-                chat_files, other_files, self.max_map_tokens, mentioned_fnames, mentioned_idents
+                chat_files,
+                other_files,
+                self.max_map_tokens,
+                mentioned_fnames,
+                mentioned_idents,
+                search_terms,
             )
         except RecursionError:
             self.io.tool_error("Disabling repo map, git repo too large?")
@@ -94,7 +121,7 @@ class RepoMap:
         else:
             other = ""
 
-        if self.repo_content_prefix:
+        if self.repo_content_prefix and add_prefix:
             repo_content = self.repo_content_prefix.format(other=other)
         else:
             repo_content = ""
@@ -103,50 +130,28 @@ class RepoMap:
 
         return repo_content
 
-    def get_rel_fname(self, fname):
-        return os.path.relpath(fname, self.root)
+    def get_tag_graph(self, abs_fnames: List[str] | None = None) -> TagGraph:
+        if not abs_fnames:
+            abs_fnames = self.file_group.get_all_filenames()
+        clean_fnames = self.file_group.validate_fnames(abs_fnames)
+        tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
+        return build_tag_graph(tags, self.code_renderer.encoding)
 
-    def split_path(self, path):
-        path = os.path.relpath(path, self.root)
-        return [path + ":"]
+    def tags_from_filename(self, fname):
+        def get_tags_raw_function(fname):
+            code = read_text(fname, self.io.encoding)
+            rel_fname = self.file_group.get_rel_fname(fname)
+            data = get_tags_raw(fname, rel_fname, code)
+            assert isinstance(data, list)
+            return data
 
-    def load_tags_cache(self):
-        path = Path(self.root) / self.TAGS_CACHE_DIR
-        if not path.exists():
-            self.cache_missing = True
-        self.TAGS_CACHE = Cache(path)
+        # return get_tags_raw_function(fname)
+        # # TODO: resume caching
+        return self.file_group.cached_function_call(fname, get_tags_raw_function)
 
-    def save_tags_cache(self):
-        pass
-
-    def get_mtime(self, fname):
-        try:
-            return os.path.getmtime(fname)
-        except FileNotFoundError:
-            self.io.tool_error(f"File not found error: {fname}")
-
-    def get_tags(self, fname, rel_fname):
-        # Check if the file is in the cache and if the modification time has not changed
-        # TODO: this should be a decorator?
-        file_mtime = self.get_mtime(fname)
-        if file_mtime is None:
-            return []
-
-        cache_key = fname
-        if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key]["mtime"] == file_mtime:
-            return self.TAGS_CACHE[cache_key]["data"]
-
-        # miss!
-        code = self.io.read_text(fname)
-        data = get_tags_raw(fname, rel_fname, code)
-        assert isinstance(data, list)
-
-        # Update the cache
-        self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
-        self.save_tags_cache()
-        return data
-
-    def get_ranked_tags(self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents):
+    def get_ranked_tags(
+        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
+    ):
 
         # Check file names for validity
         fnames = sorted(set(chat_fnames).union(set(other_fnames)))
@@ -165,33 +170,27 @@ class RepoMap:
             fnames = tqdm(fnames)
         self.cache_missing = False
 
-        cleaned_fnames = []
-        for fname in fnames:
-            if not Path(fname).is_file():
-                if fname not in self.warned_files:
-                    if Path(fname).exists():
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it is not a normal file"
-                        )
-                    else:
-                        self.io.tool_error(f"Repo-map can't include {fname}, it no longer exists")
-
-                self.warned_files.add(fname)
-                continue
-            rel_fname = self.get_rel_fname(fname)
-            cleaned_fnames.append((fname, rel_fname))
+        cleaned = self.file_group.validate_fnames(fnames)
 
         # All the source code parsing happens here
-        tags = sum([self.get_tags(fname, rel_fname) for fname, rel_fname in cleaned_fnames], [])
+        tag_graph = self.get_tag_graph(cleaned)
+        tags = list(tag_graph.nodes)
 
-        # this constructs the graph and ranks the tags based on it
-        other_rel_fnames = [self.get_rel_fname(fname) for fname in other_fnames]
-        reranked_tags = rank_tags_directly(
-            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
-        )
-        ranked_tags = rank_tags(
-            tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
-        )
+        other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
+        if self.use_old_ranking:
+            ranked_tags = rank_tags(
+                tags, mentioned_fnames, mentioned_idents, chat_fnames, other_rel_fnames
+            )
+        else:
+            ranked_tags = rank_tags_new(
+                tag_graph,
+                mentioned_fnames,
+                mentioned_idents,
+                chat_fnames,
+                other_rel_fnames,
+                search_terms,
+            )
+
         return ranked_tags
 
     def get_ranked_tags_map(
@@ -201,6 +200,7 @@ class RepoMap:
         max_map_tokens=None,
         mentioned_fnames=None,
         mentioned_idents=None,
+        search_terms=None,
     ):
         """
         Does a binary search over the number of tags to include in the map,
@@ -220,9 +220,11 @@ class RepoMap:
             mentioned_fnames = set()
         if not mentioned_idents:
             mentioned_idents = set()
+        if not search_terms:
+            search_terms = set()
 
         ranked_tags = self.get_ranked_tags(
-            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents
+            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
         )
 
         num_tags = len(ranked_tags)
@@ -231,7 +233,7 @@ class RepoMap:
         best_tree = None
         best_tree_tokens = 0
 
-        chat_rel_fnames = [self.get_rel_fname(fname) for fname in chat_fnames]
+        chat_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in chat_fnames]
 
         # Guess a small starting number to help with giant repos
         middle = min(max_map_tokens // 25, num_tags)
@@ -239,7 +241,8 @@ class RepoMap:
         self.tree_cache = dict()
 
         while lower_bound <= upper_bound:
-            tree = self.to_tree(ranked_tags[:middle], chat_rel_fnames)
+            used_tags = [tag for tag in ranked_tags[:middle] if tag[0] not in chat_rel_fnames]
+            tree = self.code_renderer.to_tree(used_tags)
             num_tokens = self.token_count(tree)
 
             if num_tokens < max_map_tokens and num_tokens > best_tree_tokens:
@@ -257,85 +260,88 @@ class RepoMap:
 
     # tree_cache = dict()
 
-    def render_tree(self, abs_fname, rel_fname, lois):
-        key = (rel_fname, tuple(sorted(lois)))
+    def repo_map_from_message(
+        self,
+        message: str,
+        abs_added_fnames: Set[str] | None = None,
+        add_prefix: bool = False,
+        llm=None,
+    ) -> str:
+        if not abs_added_fnames:
+            abs_added_fnames = set()
 
-        if key in self.tree_cache:
-            return self.tree_cache[key]
+        if llm is not None:
+            search_terms = search_terms_from_message(message, llm)
+        else:
+            search_terms = set()
 
-        code = self.io.read_text(abs_fname) or ""
-        if not code.endswith("\n"):
-            code += "\n"
+        cur_msg_text = message
+        all_files = self.file_group.get_all_filenames()
+        other_files = set(all_files) - set(abs_added_fnames)
 
-        context = TreeContext(
-            rel_fname,
-            code,
-            color=False,
-            line_number=False,
-            child_context=False,
-            last_line=False,
-            margin=0,
-            mark_lois=False,
-            loi_pad=0,
-            # header_max=30,
-            show_top_of_file_parent_scope=False,
+        mentioned_fnames = self.file_group.get_file_mentions(cur_msg_text, abs_added_fnames)
+        mentioned_idents = get_ident_mentions(cur_msg_text)
+
+        all_rel_fnames = [self.file_group.get_rel_fname(f) for f in all_files]
+        mentioned_fnames.update(get_ident_filename_matches(mentioned_idents, all_rel_fnames))
+
+        repo_content = self.get_repo_map(
+            abs_added_fnames,
+            other_files,
+            mentioned_fnames=mentioned_fnames,
+            mentioned_idents=mentioned_idents,
+            add_prefix=add_prefix,
+            search_terms=search_terms,
         )
 
-        context.add_lines_of_interest(lois)
-        context.add_context()
-        res = context.format()
-        self.tree_cache[key] = res
-        return res
+        # fall back to global repo map if files in chat are disjoint from rest of repo
+        if not repo_content:
+            repo_content = self.get_repo_map(
+                set(),
+                set(all_files),
+                mentioned_fnames=mentioned_fnames,
+                mentioned_idents=mentioned_idents,
+                add_prefix=add_prefix,
+                search_terms=search_terms,
+            )
 
-    def to_tree(self, tags: List[Tag | tuple], chat_rel_fnames):
-        if not tags:
-            return ""
+        # fall back to completely unhinted repo
+        if not repo_content:
+            repo_content = self.get_repo_map(
+                set(),
+                set(all_files),
+                add_prefix=add_prefix,
+                search_terms=search_terms,
+            )
 
-        tags = [tag for tag in tags if tag[0] not in chat_rel_fnames]
-        tags = sorted(tags, key=lambda x: tuple(x))
-
-        cur_fname = None
-        cur_abs_fname = None
-        lois = None
-        output = ""
-
-        # add a bogus tag at the end so we trip the this_fname != cur_fname...
-        dummy_tag = (None,)
-        for tag in tags + [dummy_tag]:
-            this_rel_fname = tag[0]
-
-            # ... here ... to output the final real entry in the list
-            if this_rel_fname != cur_fname:
-                if lois is not None:
-                    output += "\n"
-                    output += cur_fname + ":\n"
-                    output += self.render_tree(cur_abs_fname, cur_fname, lois)
-                    lois = None
-                elif cur_fname:
-                    output += "\n" + cur_fname + "\n"
-                if type(tag) is Tag:
-                    lois = []
-                    cur_abs_fname = tag.fname
-                cur_fname = this_rel_fname
-
-            if lois is not None:
-                lois.append(tag.line)
-
-        # truncate long lines, in case we get minified js or something else crazy
-        output = "\n".join([line[:100] for line in output.splitlines()]) + "\n"
-
-        return output
+        return repo_content
 
 
-def find_src_files(directory):
-    if not os.path.isdir(directory):
-        return [directory]
+def search_terms_from_message(message: str, llm) -> Set[str]:
+    search_prompt = f"""You are an expert bug fixer. You are given a bug report. 
+        Return a JSON list of at most 10 strings extracted from the bug report, that should be used
+        in a full-text search of the codebase to find the part of the code that needs to be modified. 
+        Select at most 10 strings that are most likely to be unique to the part of the code that needs to be modified.
+        ONLY extract strings that you could expect to find verbatim in the code, especially function names,
+        class names, and error messages. 
+        For method calls, such as `foo.bar()`, extract `.bar(` 
 
-    src_files = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            src_files.append(os.path.join(root, file))
-    return src_files
+        For error messages, extract the bits of the error message that are likely to be found VERBATIM in the code, 
+        for example "File not found: " rather than "File not found: /amger/gae/doc.tcx"; 
+        return "A string is required" rather than "A string is required, not 'MyWeirdClassName'".
+
+        Here is the problem description:
+        {message}"""
+
+    class ListOfStrings(BaseModel):
+        strings: List[str] = Field(
+            description="List of full-text search strings to find the part of the code that needs to be modified."
+        )
+
+    out = llm.with_structured_output(ListOfStrings).invoke(search_prompt)
+    re_out = [x.split(".")[-1] for x in out.strings]
+    re_out = sum([x.split(",") for x in re_out], [])
+    return set(re_out)
 
 
 def get_random_color():
