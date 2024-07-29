@@ -11,6 +11,8 @@ class MotleyCrewPrompts(EditBlockPrompts):
     files_no_full_files_with_repo_map = """
     Don't try and edit any existing code without adding files to the chat first!
 Use the tool `add_files` to add the files that **need changes** to solve the requests I make.
+If you don't have the `add_files` tool, only edit the files that have already been added,
+query for them 
 Only include the files that are most likely to actually need to be edited.
 Don't include files that might contain relevant context, just files that will need to be changed.
 Do not add any test files or files that are not relevant to the task.

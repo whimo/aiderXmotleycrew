@@ -16,52 +16,73 @@ class AddFilesToolInput(BaseModel):
 
 
 class AddFilesTool(MotleyTool):
-    def __init__(self, name: str, coder: "MotleyCrewCoder"):
-        self.coder = coder
+    def __init__(
+        self,
+        coder: "MotleyCrewCoder",
+        name: str = "Add_files",
+    ):
+        self.io = coder.io
+        self.file_group = coder  # Step towards future refactoring
 
         langchain_tool = StructuredTool.from_function(
             func=self.add_files,
             name=name,
-            description="Ask the user to add files to the chat.",
+            description="""Add files to the list of files available for modification. 
+            Only files that are already in the list of files available for modification can be modified.""",
             args_schema=AddFilesToolInput,
         )
         super().__init__(langchain_tool)
 
     def add_files(self, files: list[str]):
-        if not self.coder.io.confirm_ask("Add these files to the chat?"):
+        if not self.io.confirm_ask("Add these files to the chat?"):
             return "The user declined to add the files."
 
-        for path in files:
-            logger.info(f"Adding file to the chat: {path}")
-            self.coder.add_rel_fname(path)
-
-        files_content_prompt = self.make_files_content_prompt(files)
-        return files_content_prompt
-
-    def make_files_content_prompt(self, files):
-        prompt = self.coder.gpt_prompts.files_content_prefix
-        for filename, content in self.get_files_content(files):
-            if not is_image_file(filename):
-                prompt += "\n"
-                prompt += filename
-
-                prompt += f"\n```\n"
-                prompt += content
-                prompt += f"```\n"
-
-        return prompt
-
-    def get_files_content(self, files: list[str]):
-        for filename in files:
-            abs_filename = self.coder.abs_root_path(filename)
+        added_files = []
+        for file in files:
+            abs_filename = self.file_group.abs_root_path(file)
+            logger.info(f"Trying to add to the list of modifiable files: {abs_filename}")
             content = self.read_text_file(abs_filename)
-
             if content is None:
-                logger.warning(f"Error reading {filename}, dropping it from the chat.")
-                self.coder.abs_fnames.remove(abs_filename)
-            else:
-                yield filename, content
+                logger.error(f"Error reading {abs_filename}, skipping it.")
+                continue
+            self.file_group.add_rel_fname(file)
+            added_files.append(file)
+            logger.info(f"Added {abs_filename} to the list of modifiable files.")
 
+        if not added_files:
+            return "No files were added to the list of modifiable files."
+        else:
+            return (
+                f"Added the following files to the list of modifiable files: {', '.join(added_files)}, "
+                f"please use the Inspect_Entity tool to inspect them."
+            )
+
+    # Should be using the inspect_object_tool instead
+    # def make_files_content_prompt(self, files):
+    #     prompt = self.coder.gpt_prompts.files_content_prefix
+    #     for filename, content in self.get_files_content(files):
+    #         if not is_image_file(filename):
+    #             prompt += "\n"
+    #             prompt += filename
+    #
+    #             prompt += f"\n```\n"
+    #             prompt += content
+    #             prompt += f"```\n"
+    #
+    #     return prompt
+
+    # def get_file_content(self, files: list[str]):
+    #     for filename in files:
+    #         abs_filename = self.coder.abs_root_path(filename)
+    #         content = self.read_text_file(abs_filename)
+    #
+    #         if content is None:
+    #             logger.warning(f"Error reading {filename}, dropping it from the chat.")
+    #             self.coder.abs_fnames.remove(abs_filename)
+    #         else:
+    #             yield filename, content
+
+    # TODO: move this to the FileGroup class
     def read_text_file(self, filename: str):
         try:
             with open(str(filename), "r", encoding="utf-8") as f:

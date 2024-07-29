@@ -48,7 +48,7 @@ class Coder:
     abs_fnames = None
     repo = None
     last_aider_commit_hash = None
-    aider_edited_files = None
+    aider_edited_files = []
     last_asked_for_commit_time = 0
     repo_map = None
     functions = None

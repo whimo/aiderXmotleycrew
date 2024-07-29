@@ -42,7 +42,7 @@ class MotleyCrewCoder(EditBlockCoder):
             except EOFError:
                 return
 
-    def create_prompt(self, user_message: str):
+    def create_prompt(self, user_message: str) -> ChatPromptTemplate:
         messages = [self.gpt_prompts.main_system, self.gpt_prompts.system_reminder]
 
         messages += self.gpt_prompts.example_messages
@@ -60,7 +60,7 @@ class MotleyCrewCoder(EditBlockCoder):
 
         return self.create_and_fill_prompt_template(messages)
 
-    def create_and_fill_prompt_template(self, messages: list):
+    def create_and_fill_prompt_template(self, messages: list) -> ChatPromptTemplate:
         lazy_prompt = self.gpt_prompts.lazy_prompt if self.main_model.lazy else ""
 
         prompt_template = ChatPromptTemplate.from_messages(messages)

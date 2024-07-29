@@ -264,11 +264,20 @@ class RepoMap:
         self,
         message: str,
         abs_added_fnames: Set[str] | None = None,
+        rel_added_fnames: Set[str] | None = None,
         add_prefix: bool = False,
         llm=None,
     ) -> str:
+        # TODO: this is a hack, should be able to supply either/or with one argument
+        if rel_added_fnames is None:
+            rel_added_fnames = set()
+        else:
+            rel_added_fnames = set([self.file_group.abs_root_path(f) for f in rel_added_fnames])
+
         if not abs_added_fnames:
             abs_added_fnames = set()
+
+        abs_added_fnames = abs_added_fnames.union(rel_added_fnames)
 
         if llm is not None:
             search_terms = search_terms_from_message(message, llm)

@@ -47,7 +47,7 @@ class FileGroup:
         "Gives an abs path, which safely returns a full (not 8.3) windows path"
         res = Path(self.root) / path
         res = Path(res).resolve()
-        return res
+        return str(res)
 
     def get_all_filenames(self):
         """
@@ -57,7 +57,7 @@ class FileGroup:
         if self.repo:
             files = self.repo.get_tracked_files()
             files = [self.abs_root_path(fname) for fname in files]
-            files = [str(fname) for fname in files if fname.is_file()]
+            files = [str(fname) for fname in files if os.path.isfile(str(fname))]
 
         else:
             files = [str(f) for f in Path(self.root).rglob("*") if f.is_file()]

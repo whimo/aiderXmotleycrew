@@ -21,7 +21,8 @@ class FileEditToolInput(BaseModel):
 
 
 class FileEditTool(MotleyTool):
-    def __init__(self, name: str, coder: "MotleyCrewCoder"):
+    def __init__(self, coder: "MotleyCrewCoder", name: str = "Edit_file"):
+        # TODO: replace coder with specific components
         self.coder = coder
 
         langchain_tool = StructuredTool.from_function(
@@ -32,8 +33,9 @@ class FileEditTool(MotleyTool):
         )
         super().__init__(langchain_tool)
 
-    def edit_file(self, file_path: str, language: str, search: str, replace: str):
+    def edit_file(self, file_path: str, language: str, search: str, replace: str) -> str:
         error_message = self.edit_file_inner(file_path, search, replace)
+        # TODO: num_reflections belongs in the calling agent, not in the tool!
         if error_message:
             if self.coder.num_reflections < self.coder.max_reflections:
                 self.coder.num_reflections += 1
@@ -42,10 +44,22 @@ class FileEditTool(MotleyTool):
                 logger.warning(f"Only {self.coder.max_reflections} reflections allowed, stopping.")
         return self.coder.gpt_prompts.file_edit_success.format(file_path=file_path)
 
-    def edit_file_inner(self, file_path: str, search: str, replace: str):
+    def edit_file_inner(self, file_path: str, search: str, replace: str) -> str:
+
+        if search[-1] != "\n":
+            search += "\n"
+        if replace[-1] != "\n":
+            replace += "\n"
+
+        abs_path = self.coder.abs_root_path(file_path)
+        if abs_path not in self.coder.abs_fnames:
+            return f"""Cannot edit {file_path} yet. You need to add it to the list 
+            of editable files using the Add_files_to_be_modified tool first."""
+
+        # here it checks for all sorts of other possible issues
         allowed_to_edit = self.coder.allowed_to_edit(file_path)
         if not allowed_to_edit:
-            return f"Cannot edit {file_path}."
+            return f"""Cannot edit {file_path}. """
 
         try:
             self.coder.dirty_commit()  # Add the file to the repo if it's not already there
@@ -60,8 +74,9 @@ class FileEditTool(MotleyTool):
             logger.warning(str(err))
             return str(err)
         except git.exc.GitCommandError as err:
-            logger.warning("Git error while editing file %s: %s", file_path, str(err))
-            return  # I see no point in returning the error to the agent (the user is aware)
+            message = f"Git error while editing file {file_path}:{str(err)}"
+            logger.warning(message)
+            return message
         except Exception as err:
             logger.warning("Exception while updating files:")
             logger.warning(str(err), strip=False)
@@ -80,7 +95,6 @@ class FileEditTool(MotleyTool):
                     return errors
 
         if self.coder.dry_run:
-            logger.warning(f"Did not apply edit to {file_path} (--dry-run)")
+            return f"Did not apply edit to {file_path} (--dry-run)"
         else:
-            logger.info(f"Applied edit to {file_path}")
-        return
+            return f"Applied edit to {file_path}"
