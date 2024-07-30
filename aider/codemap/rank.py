@@ -1,5 +1,6 @@
+import copy
 from collections import defaultdict, Counter
-from typing import List
+from typing import List, Dict
 
 import networkx as nx
 import numpy as np
@@ -14,24 +15,26 @@ def rank_tags_new(
     chat_fnames,
     other_rel_fnames,
     search_terms,
+    diffusion_mult=0.2,
 ) -> List[Tag | tuple]:
-    tag_weights = defaultdict(float)
+    G = copy.deepcopy(tag_graph)
+    for tag in G.nodes:
+        G.nodes[tag]["weight"] = 0.0
+
     # process mentioned_idents
     for tag in tag_graph.nodes:
         if tag.kind == "def" and tag.name in mentioned_idents:
-            tag_weights[tag] += 1.0
+            G.nodes[tag]["weight"] += 1.0
 
     # process mentioned_fnames
-    fname_counts = defaultdict(int)
-    for tag in tag_graph.nodes:
-        if tag.kind == "def" and tag.fname in mentioned_fnames:
-            fname_counts[tag.fname] += 1
+    mentioned_weights = weights_from_fnames(tag_graph, mentioned_fnames)
+    for tag, weight in mentioned_weights.items():
+        G.nodes[tag]["weight"] += 0.2 * weight
 
-    # Normalize the weights to take into account what's typical in the codebase
-    typical_count = np.median(np.array(list(fname_counts.values())))
-    for tag in tag_graph.nodes:
-        if tag.fname in fname_counts and tag.kind == "def":
-            tag_weights[tag] += 0.1 * typical_count / fname_counts[tag.fname]
+    # process chat_fnames
+    chat_fname_weights = weights_from_fnames(tag_graph, chat_fnames)
+    for tag, weight in chat_fname_weights.items():
+        G.nodes[tag]["weight"] += 0.5 * weight
 
     # process search_terms:
     tag_matches = defaultdict(set)
@@ -43,15 +46,22 @@ def rank_tags_new(
     typical_search_count = np.median([len(tags) for tags in tag_matches.values()])
     for term, tags in tag_matches.items():
         for tag in tags:
-            tag_weights[tag] += typical_search_count / len(tags)
+            G.nodes[tag]["weight"] += typical_search_count / len(tags)
 
-    # TODO: propagate these weights through the graph to references
+    # diffuse these weights through the graph
+    G1 = copy.deepcopy(G)
+    for t in G.nodes:
+        for _, t2 in G.out_edges(t):
+            G.nodes[t2]["weight"] += G1.nodes[t]["weight"] * diffusion_mult
 
     # Order the tags by weight
-    tags = sorted([(t[1], t[0]) for t in tag_weights.items()], key=lambda x: -tag_weights[x[1]])
+    node_list = [(G.nodes[tag]["weight"], tag) for tag in G.nodes]
+    tags = sorted(
+        node_list,
+        key=lambda x: x[0],
+        reverse=True,
+    )
 
-    # TODO: do we need to handle chat_fnames here too?
-    # Probably yes, once we have some.
     return [t[1] for t in tags]
 
 
@@ -172,3 +182,21 @@ def rank_tags(
         ranked_tags.append((fname,))
 
     return ranked_tags
+
+
+def weights_from_fnames(
+    tag_graph: nx.MultiDiGraph, mentioned_fnames: List[str]
+) -> Dict[Tag, float]:
+    tag_weights = defaultdict(float)
+    fname_counts = defaultdict(int)
+    for tag in tag_graph.nodes:
+        if tag.kind == "def" and tag.fname in mentioned_fnames:
+            fname_counts[tag.fname] += 1
+
+    # Normalize the weights to take into account what's typical in the codebase
+    typical_count = np.median(np.array(list(fname_counts.values())))
+    for tag in tag_graph.nodes:
+        if tag.fname in fname_counts and tag.kind == "def":
+            tag_weights[tag] += typical_count / fname_counts[tag.fname]
+
+    return tag_weights

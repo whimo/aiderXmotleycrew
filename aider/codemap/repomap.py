@@ -14,7 +14,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 
 from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
 from aider.codemap.tag import Tag
-from aider.codemap.graph import TagGraph, build_tag_graph  # noqa: F402
+from aider.codemap.graph import TagGraph, build_tag_graph, only_defs  # noqa: F402
 from aider.codemap.rank import rank_tags_new, rank_tags  # noqa: F402
 from aider.codemap.file_group import (
     FileGroup,
@@ -135,7 +135,8 @@ class RepoMap:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
         tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
-        return build_tag_graph(tags, self.code_renderer.encoding)
+        raw_graph = build_tag_graph(tags, self.code_renderer.encoding)
+        return only_defs(raw_graph)
 
     def tags_from_filename(self, fname):
         def get_tags_raw_function(fname):
