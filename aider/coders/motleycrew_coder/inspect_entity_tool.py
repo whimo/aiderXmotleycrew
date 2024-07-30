@@ -69,13 +69,16 @@ class InspectEntityTool(MotleyTool):
                 return f"File {file_name} not found in the repo"
 
         elif len(re_tags) == 1:
-            return tag_graph.get_tag_representation(re_tags[0], parent_details=True)
+            return tag_graph.get_tag_representation(re_tags[0], parent_details=True, max_lines=200)
         else:  # Can get multiple tags eg when requesting a whole file
             # TODO: this could be neater
             repr = "\n".join(
-                [tag_graph.get_tag_representation(t, parent_details=False) for t in re_tags]
+                [
+                    tag_graph.get_tag_representation(t, parent_details=False, max_lines=25)
+                    for t in re_tags
+                ]
             )
-            if len(repr.split("\n")) < 100:
+            if len(repr.split("\n")) < 200:
                 return repr
             else:
                 return tag_graph.code_renderer.to_tree(re_tags)

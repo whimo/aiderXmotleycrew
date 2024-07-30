@@ -40,7 +40,7 @@ class TagGraph(nx.MultiDiGraph):
 
         return predecessors + [parent]
 
-    def get_tag_representation(self, tag: Tag, parent_details: bool = False) -> str:
+    def get_tag_representation(self, tag: Tag, parent_details: bool = False, max_lines=200) -> str:
         if tag is None:
             return None
         if tag not in self.nodes:
@@ -62,10 +62,10 @@ class TagGraph(nx.MultiDiGraph):
         tag_repr.append(RenderCode.text_with_line_numbers(tag))
         tag_repr = "\n".join(tag_repr)
 
-        if len(tag_repr.split("\n")) <= 30:
-            # if the full text hast at most 50 lines, put it all in the summary
+        if len(tag_repr.split("\n")) <= max_lines:
+            # if the full text hast at most 200 lines, put it all in the summary
             children = []
-            for c in self.successors(tag):
+            for _, c in self.out_edges(tag):
                 if (  # If the child is included in the parent's full text anyway, skip it
                     c.fname == tag.fname
                     and c.byte_range[0] >= tag.byte_range[0]
