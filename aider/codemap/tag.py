@@ -11,6 +11,8 @@ class Tag:
     text: str
     byte_range: tuple[int, int]
     parent_names: tuple[str, ...] = ()
+    language: str | None = None
+    n_defs: int = 0
 
     @property
     def full_name(self):

@@ -32,7 +32,7 @@ def get_query(lang: str) -> Query | None:
 
 def ast_to_tags(
     full_file_code: str, tree: Tree, query: Query, rel_fname: str, fname: str
-) -> List[Tag]:
+, language: str | None = None) -> List[Tag]:
     # TODO: extract docstrings and comments to do RAG on
     captures = list(query.captures(tree.root_node))
     defs = []
@@ -68,6 +68,7 @@ def ast_to_tags(
                 line=name_node.start_point[0],
                 text=node.text.decode("utf-8"),
                 byte_range=node.byte_range,
+                language=language,
             )
         )
 
@@ -108,7 +109,7 @@ def get_def_parents(node: Node, defs: List[Node]) -> List[Node]:
     return tuple(reversed(dp))
 
 
-def refs_from_lexer(rel_fname, fname, code):
+def refs_from_lexer(rel_fname, fname, code, language: str | None = None):
     try:
         lexer = guess_lexer_for_filename(fname, code)
     except ClassNotFound:
@@ -126,6 +127,7 @@ def refs_from_lexer(rel_fname, fname, code):
             line=-1,
             text="",
             byte_range=(0, 0),
+            language=language,
         )
         for token in tokens
     ]
@@ -147,7 +149,7 @@ def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
     if not query:
         return []
 
-    pre_tags = ast_to_tags(code, ast, query, rel_fname, fname)
+    pre_tags = ast_to_tags(code, ast, query, rel_fname, fname, lang)
 
     saw = set([tag.kind for tag in pre_tags])
     if "ref" in saw or "def" not in saw:
@@ -156,7 +158,7 @@ def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
     # We saw defs, without any refs
     # Some tags files only provide defs (cpp, for example)
     # Use pygments to backfill refs
-    refs = refs_from_lexer(rel_fname, fname, code)
+    refs = refs_from_lexer(rel_fname, fname, code, lang)
     out = pre_tags + refs
     return out
 

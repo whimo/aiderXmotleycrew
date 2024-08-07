@@ -39,7 +39,7 @@ class InspectEntityTool(MotleyTool):
 
         langchain_tool = StructuredTool.from_function(
             func=self.get_object_summary,
-            name="Inspect_Entity",
+            name="inspect_entity",
             description=""""Get the code of the entity with a given name (if that's not too long), 
             including summary of the entities it references. Valid entities 
             are function names, class names, method names prefixed with class, like `Foo.bar`. 
@@ -73,7 +73,7 @@ class InspectEntityTool(MotleyTool):
 
         if not re_tags:  # maybe it was an explicit import?
             if entity_name is not None:
-                out = f"Definition of entity {entity_name}  not found in the repo"
+                out = f"Definition of entity {entity_name} not found in the repo"
                 if file_name is None or self.to_dir(file_name) is None:
                     return out  # Absolutely no directories to work with
                 else:

@@ -11,7 +11,7 @@ class GetModifiableFilesToolInput(BaseModel):
 
 
 class GetModifiableFilesTool(MotleyTool):
-    def __init__(self, coder: "MotleyCrewCoder", name: str = "Get_modifiable_files"):
+    def __init__(self, coder: "MotleyCrewCoder", name: str = "get_modifiable_files"):
 
         langchain_tool = StructuredTool.from_function(
             func=self.get_modifiable_files,

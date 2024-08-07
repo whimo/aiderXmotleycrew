@@ -48,6 +48,7 @@ class RepoMap:
         max_context_window=None,
         file_group: FileGroup = None,
         use_old_ranking: bool = False,
+        cache_graphs: bool = False
     ):
         self.io = io
         self.verbose = verbose
@@ -66,6 +67,7 @@ class RepoMap:
         self.repo_content_prefix = repo_content_prefix
         self.file_group = file_group
         self.code_renderer = RenderCode()
+        self.tag_graphs = {} if cache_graphs else None
 
     def get_repo_map(
         self,
@@ -134,6 +136,12 @@ class RepoMap:
         if not abs_fnames:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
+
+        if self.tag_graphs is not None:
+            for files, graph in self.tag_graphs.items():
+                if not set(clean_fnames).difference(set(files)):
+                    return graph
+        # If no caching or cached graph not found, construct it
         all_tags = []
         code_map = {}
         for fname in clean_fnames:
@@ -141,7 +149,10 @@ class RepoMap:
             all_tags += tags
             code_map[fname] = code
         raw_graph = build_tag_graph(all_tags, code_map)
-        return only_defs(raw_graph)
+        graph = only_defs(raw_graph)
+        if self.tag_graphs is not None:
+            self.tag_graphs[tuple(clean_fnames)] = graph
+        return graph
 
     def tags_from_filename(self, fname):
         def get_tags_raw_function(fname):
@@ -249,7 +260,7 @@ class RepoMap:
         self.tree_cache = dict()
 
         while lower_bound <= upper_bound:
-            used_tags = [tag for tag in ranked_tags[:middle] if tag[0] not in chat_rel_fnames]
+            used_tags = [tag for tag in ranked_tags[:middle]]  # if tag[0] not in chat_rel_fnames]
             tree = self.code_renderer.to_tree(used_tags)
             num_tokens = self.token_count(tree)
 
