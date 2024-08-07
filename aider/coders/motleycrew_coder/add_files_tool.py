@@ -19,7 +19,7 @@ class AddFilesTool(MotleyTool):
     def __init__(
         self,
         coder: "MotleyCrewCoder",
-        name: str = "Add_files",
+        name: str = "add_files",
     ):
         self.io = coder.io
         self.file_group = coder  # Step towards future refactoring

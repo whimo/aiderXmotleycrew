@@ -28,7 +28,7 @@ class InspectEntityTool(MotleyTool):
 
         langchain_tool = StructuredTool.from_function(
             func=self.get_object_summary,
-            name="Inspect_Entity",
+            name="inspect_entity",
             description=""""Get the full code of the entity with a given name, 
             including summary of the entities it references. Valid entities 
             are function names, class names,
@@ -64,7 +64,7 @@ class InspectEntityTool(MotleyTool):
             if entity_name is not None:
                 # if we don't find it in the file specified, we search the whole repo
                 #
-                return f"Definition of entity {entity_name}  not found in the repo"
+                return f"Definition of entity {entity_name} not found in the repo"
             else:
                 return f"File {file_name} not found in the repo"
 

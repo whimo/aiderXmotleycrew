@@ -54,8 +54,7 @@ class MotleyCrewCoder(EditBlockCoder):
             AIMessage("Ok."),
         ]
 
-        messages += msg_utils.convert_to_messages(self.get_files_messages())
-        messages += [HumanMessage(user_message)]
+        # messages += [HumanMessage(user_message)]
         messages += [self.gpt_prompts.system_reminder]
 
         return self.create_and_fill_prompt_template(messages)

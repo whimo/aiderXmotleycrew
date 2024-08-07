@@ -66,6 +66,7 @@ class RepoMap:
         self.repo_content_prefix = repo_content_prefix
         self.file_group = file_group
         self.code_renderer = RenderCode(text_encoding=self.io.encoding)
+        self.tag_graphs = {}
 
     def get_repo_map(
         self,
@@ -134,9 +135,16 @@ class RepoMap:
         if not abs_fnames:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
+
+        for files, graph in self.tag_graphs.items():
+            if not set(clean_fnames).difference(set(files)):
+                return graph
+
         tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
         raw_graph = build_tag_graph(tags, self.code_renderer.encoding)
-        return only_defs(raw_graph)
+        graph = only_defs(raw_graph)
+        self.tag_graphs[tuple(clean_fnames)] = graph
+        return graph
 
     def tags_from_filename(self, fname):
         def get_tags_raw_function(fname):
@@ -242,7 +250,7 @@ class RepoMap:
         self.tree_cache = dict()
 
         while lower_bound <= upper_bound:
-            used_tags = [tag for tag in ranked_tags[:middle] if tag[0] not in chat_rel_fnames]
+            used_tags = [tag for tag in ranked_tags[:middle]]  # if tag[0] not in chat_rel_fnames]
             tree = self.code_renderer.to_tree(used_tags)
             num_tokens = self.token_count(tree)
 

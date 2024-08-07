@@ -21,7 +21,7 @@ class FileEditToolInput(BaseModel):
 
 
 class FileEditTool(MotleyTool):
-    def __init__(self, coder: "MotleyCrewCoder", name: str = "Edit_file"):
+    def __init__(self, coder: "MotleyCrewCoder", name: str = "edit_file"):
         # TODO: replace coder with specific components
         self.coder = coder
 
@@ -45,15 +45,14 @@ class FileEditTool(MotleyTool):
         return self.coder.gpt_prompts.file_edit_success.format(file_path=file_path)
 
     def edit_file_inner(self, file_path: str, search: str, replace: str) -> str:
-
-        if search[-1] != "\n":
+        if not search or search[-1] != "\n":
             search += "\n"
-        if replace[-1] != "\n":
+        if not replace or replace[-1] != "\n":
             replace += "\n"
 
         abs_path = self.coder.abs_root_path(file_path)
         if abs_path not in self.coder.abs_fnames:
-            return f"""Cannot edit {file_path} yet. You need to add it to the list 
+            return f"""Cannot edit {file_path} yet. You need to add it to the list
             of editable files using the Add_files_to_be_modified tool first."""
 
         # here it checks for all sorts of other possible issues

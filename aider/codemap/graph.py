@@ -9,6 +9,50 @@ from aider.codemap.tag import Tag
 from aider.codemap.render import RenderCode
 
 
+builtins_by_lang = {
+    "python": {
+        # Built-in functions
+        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes", "callable",
+        "chr", "classmethod", "compile", "complex", "delattr", "dict", "dir", "divmod",
+        "enumerate", "eval", "exec", "filter", "float", "format", "frozenset", "getattr",
+        "globals", "hasattr", "hash", "help", "hex", "id", "input", "int", "isinstance",
+        "issubclass", "iter", "len", "list", "locals", "map", "max", "memoryview", "min",
+        "next", "object", "oct", "open", "ord", "pow", "print", "property", "range",
+        "repr", "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod",
+        "str", "sum", "super", "tuple", "type", "vars", "zip",
+        # Reserved keywords
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+        "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
+        "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
+        "raise", "return", "try", "while", "with", "yield",
+        # Magic methods
+        "__abs__", "__add__", "__and__", "__bool__", "__bytes__", "__call__", "__ceil__",
+        "__cmp__", "__coerce__", "__complex__", "__contains__", "__del__", "__delattr__",
+        "__delete__", "__delitem__", "__delslice__", "__dir__", "__div__", "__divmod__",
+        "__enter__", "__eq__", "__exit__", "__float__", "__floor__", "__floordiv__",
+        "__ge__", "__get__", "__getattr__", "__getattribute__", "__getitem__", "__getslice__",
+        "__gt__", "__hash__", "__iadd__", "__iand__", "__ifloordiv__", "__ilshift__",
+        "__imod__", "__import__", "__imul__", "__index__", "__init__", "__instancecheck__",
+        "__int__", "__invert__", "__ior__", "__ipow__", "__irshift__", "__isub__",
+        "__iter__", "__itruediv__", "__ixor__", "__le__", "__len__", "__long__", "__lshift__",
+        "__lt__", "__mod__", "__mul__", "__ne__", "__neg__", "__new__", "__nonzero__",
+        "__oct__", "__or__", "__pos__", "__pow__", "__radd__", "__rand__", "__rdiv__",
+        "__rdivmod__", "__repr__", "__reversed__", "__rfloordiv__", "__rlshift__",
+        "__rmod__", "__rmul__", "__ror__", "__round__", "__rpow__", "__rrshift__",
+        "__rshift__", "__rsub__", "__rtruediv__", "__rxor__", "__set__", "__setattr__",
+        "__setitem__", "__setslice__", "__str__", "__sub__", "__truediv__", "__xor__",
+        "__subclasscheck__", "__subclasses__", "__format__", "__sizeof__", "__dir__",
+        "__class__", "__doc__", "__enter__", "__exit__", "__annotations__", "__kwdefaults__",
+        "__code__", "__defaults__", "__globals__", "__closure__", "__doc__", "__name__",
+        "__qualname__", "__module__", "__defaults__", "__kwdefaults__", "__code__",
+        "__globals__", "__closure__", "__get__", "__set__", "__delete__", "__slots__",
+        "__weakref__", "__dict__", "__bases__", "__class__", "__mro__", "__subclasses__",
+        "__init_subclass__", "__prepare__", "__instancecheck__", "__subclasscheck__",
+        "__class_getitem__"
+    }
+}
+
+
 class TagGraph(nx.MultiDiGraph):
     def __init__(self, encoding: str):
         super().__init__()
@@ -17,6 +61,29 @@ class TagGraph(nx.MultiDiGraph):
     @property
     def filenames(self):
         return set([tag.fname for tag in self.nodes])
+
+    def successors_with_attribute(self, node, attr_name, attr_value):
+        """
+        Get all neighbors of a node in a MultiDiGraph where the relationship has a specific attribute.
+
+        Parameters:
+        G (networkx.MultiDiGraph): The graph
+        node (node): The node for which to find neighbors
+        attr_name (str): The attribute name to filter edges
+        attr_value: The attribute value to filter edges
+
+        Returns:
+        list: A list of neighbors where the relationship has the specified attribute
+        """
+        neighbors = []
+        for successor in self.successors(node):
+            # Check all edges from node to successor
+            edges = self[node][successor]
+            for key in edges:
+                if edges[key].get(attr_name) == attr_value:
+                    neighbors.append(successor)
+                    break  # Found a valid edge, no need to check further
+        return neighbors
 
     def get_parents(self, tag: Tag) -> List[Tag] | str:
         """
@@ -65,13 +132,15 @@ class TagGraph(nx.MultiDiGraph):
         if len(tag_repr.split("\n")) <= max_lines:
             # if the full text hast at most 200 lines, put it all in the summary
             children = []
-            for _, c in self.out_edges(tag):
+            for e, c, data in self.out_edges(tag, data=True):
                 if (  # If the child is included in the parent's full text anyway, skip it
                     c.fname == tag.fname
                     and c.byte_range[0] >= tag.byte_range[0]
                     and c.byte_range[1] <= tag.byte_range[1]
-                ):
+                ) or not data.get("include_in_summary"):
                     continue
+                if c.name in builtins_by_lang.get(c.language, []):
+                    continue  # skip built-ins
                 children.append(c)
 
             out = [tag_repr]
@@ -85,8 +154,9 @@ class TagGraph(nx.MultiDiGraph):
             return "\n".join(out)
         else:
             # if the full text is too long, send a summary of it and its children
-            children = list(self.successors(tag))
-            tag_repr = self.code_renderer.to_tree([tag] + children)
+            children = list(self.successors_with_attribute(tag, attr_name="include_in_summary", attr_value=True))
+            tag_repr = self.code_renderer.to_tree([tag] + [c for c in children
+                                                           if c.name not in builtins_by_lang.get(c.language, [])])
             return tag_repr
 
     def get_tag_from_filename_lineno(
@@ -208,6 +278,7 @@ def build_tag_graph(tags: List[Tag], text_encoding: str = "utf-8") -> TagGraph:
                 # would probably need a language server for unique resolution,
                 # don't bother with that here
                 G.add_edge(tag, def_tag)
+                tag.n_defs += 1
 
         # Build up definition hierarchy
         # A parent definition for a tag must:
@@ -240,6 +311,7 @@ def only_defs(tag_graph: TagGraph) -> TagGraph:
             G.add_node(tag)
     for u, v, data in tag_graph.edges(data=True):
         if u.kind == "def" and v.kind == "def":
+            data["include_in_summary"] = True
             G.add_edge(u, v, **data)
     # Also add edges betweend defs and their two-hop descendant defs
     # TODO: should we look for more than two-hop def descendants? Can these ever happen?
@@ -247,6 +319,7 @@ def only_defs(tag_graph: TagGraph) -> TagGraph:
         if u.kind == "def" and v.kind != "def":
             for _, v_desc in tag_graph.out_edges(v):
                 if v_desc.kind == "def":
+                    data["include_in_summary"] = (v.n_defs <= 2)  # Skip entries with more than 2 definition candidates
                     G.add_edge(u, v_desc, **data)
     return G
 
