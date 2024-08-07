@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from collections import defaultdict
 
 import networkx as nx
@@ -10,9 +10,9 @@ from aider.codemap.render import RenderCode
 
 
 class TagGraph(nx.MultiDiGraph):
-    def __init__(self, encoding: str):
+    def __init__(self):
         super().__init__()
-        self.code_renderer = RenderCode(text_encoding=encoding)
+        self.code_renderer = RenderCode()
 
     @property
     def filenames(self):
@@ -171,7 +171,7 @@ def match_entity_name(entity_name: str, tag: Tag) -> bool:
     return False
 
 
-def build_tag_graph(tags: List[Tag], text_encoding: str = "utf-8") -> TagGraph:
+def build_tag_graph(tags: List[Tag], code_map: Dict[str, str]) -> TagGraph:
     """
     Build a graph of tags, with edges from references to definitions
     And with edges from parent definitions to child definitions in the same file
@@ -181,12 +181,18 @@ def build_tag_graph(tags: List[Tag], text_encoding: str = "utf-8") -> TagGraph:
     # Build a map from entity names to their definitions
     # There may be multiple definitions for a single name in different scopes,
     # for now we don't bother resolving them
+    G = TagGraph()
+    G.code_renderer.code_map = code_map
+
     def_map = defaultdict(set)
+
     for tag in tags:
         if tag.kind == "def":
             def_map[tag.name].add(tag)
+        elif tag.kind == "file":
+            # Just add all the parsed files to the graph
+            G.add_node(tag, kind=tag.kind)
 
-    G = TagGraph(text_encoding)
     # Add all tags as nodes
     # Add edges from references to definitions
     for tag in tags:
@@ -234,7 +240,9 @@ def only_defs(tag_graph: TagGraph) -> TagGraph:
     :return: A graph with only def nodes and edges between them
     """
 
-    G = TagGraph(tag_graph.code_renderer.encoding)
+    G = TagGraph()
+    G.code_renderer.code_map = tag_graph.code_renderer.code_map
+
     for tag in tag_graph.nodes:
         if tag.kind == "def":
             G.add_node(tag)

@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 from grep_ast import TreeContext
 
@@ -8,9 +8,9 @@ from aider.codemap.tag import Tag
 
 
 class RenderCode:
-    def __init__(self, text_encoding="utf-8"):
-        self.tree_cache = dict()
-        self.encoding = text_encoding
+    def __init__(self):
+        self.tree_cache = {}
+        self.code_map = {}
 
     def to_tree(self, tags: List[Tag | tuple]) -> str:
         if not tags:
@@ -33,7 +33,7 @@ class RenderCode:
                 if lois is not None:
                     output += "\n"
                     output += cur_fname + ":\n"
-                    output += self.render_tree(cur_abs_fname, cur_fname, lois)
+                    output += self.render_tree(cur_fname, lois, code=self.code_map[cur_abs_fname])
                     lois = None
                 elif cur_fname:
                     output += "\n" + cur_fname + "\n"
@@ -50,14 +50,13 @@ class RenderCode:
 
         return output
 
-    def render_tree(self, abs_fname, rel_fname, lois, line_number: bool = True) -> str:
+    def render_tree(self, rel_fname, lois, line_number: bool = True, code="") -> str:
         key = (rel_fname, tuple(sorted(lois)))
 
         if key in self.tree_cache:
             return self.tree_cache[key]
 
-        code = read_text(abs_fname, self.encoding) or ""
-        if not code.endswith("\n"):
+        if code and not code.endswith("\n"):
             code += "\n"
 
         context = TreeContext(
@@ -87,3 +86,16 @@ class RenderCode:
             re_line = f"{i+1+t.line:3}│{line}"
             out.append(re_line)
         return "\n".join(out)
+
+    @staticmethod
+    def render_directory(
+        abs_directory: str, rel_directory: str, tags: Optional[List[Tag]] = None
+    ) -> str:
+        """
+        Return the list of all the files in that directory.
+        If tags is not None, exclude all the filenames that occur in tags.
+        :param directory:
+        :param tags:
+        :return:
+        """
+        filenames = []

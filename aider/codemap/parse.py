@@ -30,7 +30,9 @@ def get_query(lang: str) -> Query | None:
     return query
 
 
-def tree_to_tags(tree: Tree, query: Query, rel_fname: str, fname: str) -> List[Tag]:
+def ast_to_tags(
+    full_file_code: str, tree: Tree, query: Query, rel_fname: str, fname: str
+) -> List[Tag]:
     # TODO: extract docstrings and comments to do RAG on
     captures = list(query.captures(tree.root_node))
     defs = []
@@ -140,12 +142,12 @@ def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
     if not code:
         return []
 
-    tree = parser.parse(bytes(code, "utf-8"))
+    ast = parser.parse(bytes(code, "utf-8"))
     query = get_query(lang)
     if not query:
         return []
 
-    pre_tags = tree_to_tags(tree, query, rel_fname, fname)
+    pre_tags = ast_to_tags(code, ast, query, rel_fname, fname)
 
     saw = set([tag.kind for tag in pre_tags])
     if "ref" in saw or "def" not in saw:
@@ -155,7 +157,8 @@ def get_tags_raw(fname, rel_fname, code) -> list[Tag]:
     # Some tags files only provide defs (cpp, for example)
     # Use pygments to backfill refs
     refs = refs_from_lexer(rel_fname, fname, code)
-    return pre_tags + refs
+    out = pre_tags + refs
+    return out
 
 
 def read_text(filename: str, encoding: str = "utf-8") -> str | None:

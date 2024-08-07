@@ -65,7 +65,7 @@ class RepoMap:
         self.token_count = main_model.token_count
         self.repo_content_prefix = repo_content_prefix
         self.file_group = file_group
-        self.code_renderer = RenderCode(text_encoding=self.io.encoding)
+        self.code_renderer = RenderCode()
 
     def get_repo_map(
         self,
@@ -134,8 +134,13 @@ class RepoMap:
         if not abs_fnames:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
-        tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
-        raw_graph = build_tag_graph(tags, self.code_renderer.encoding)
+        all_tags = []
+        code_map = {}
+        for fname in clean_fnames:
+            code, tags = self.tags_from_filename(fname)
+            all_tags += tags
+            code_map[fname] = code
+        raw_graph = build_tag_graph(all_tags, code_map)
         return only_defs(raw_graph)
 
     def tags_from_filename(self, fname):
@@ -144,7 +149,7 @@ class RepoMap:
             rel_fname = self.file_group.get_rel_fname(fname)
             data = get_tags_raw(fname, rel_fname, code)
             assert isinstance(data, list)
-            return data
+            return code, data
 
         # return get_tags_raw_function(fname)
         # # TODO: resume caching
@@ -175,6 +180,8 @@ class RepoMap:
 
         # All the source code parsing happens here
         tag_graph = self.get_tag_graph(cleaned)
+        self.code_renderer.code_map = tag_graph.code_renderer.code_map
+
         tags = list(tag_graph.nodes)
 
         other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]
