@@ -16,9 +16,12 @@ if TYPE_CHECKING:
 
 
 class GetFullTextToolInput(BaseModel):
-    entity_name: str = Field(description="Name of the entity to inspect.", default=None)
+    entity_name: Optional[str] = Field(description="Name of the entity to inspect.", default=None)
     file_name: Optional[str] = Field(
         description="Full or partial name of the file(s) to inspect", default=None
+    )
+    first_line: Optional[int] = Field(
+        description="First line of the code snippet to return", default=None
     )
 
 
@@ -34,13 +37,22 @@ class GetFullTextTool(MotleyTool):
             Valid entities are function names, class names,
             method names prefixed with class, like `Foo.bar`. 
             You can restrict your search to specific files by supplying the optional file_name argument.
+            Do NOT use this tool to inspect whole files - use the inspect_entity tool for that.
             You MUST supply at least the entity_name.
             """,
             args_schema=GetFullTextToolInput,
         )
         super().__init__(langchain_tool)
 
-    def get_full_text(self, entity_name: str, file_name: Optional[str] = None) -> str:
+    def get_full_text(
+        self,
+        entity_name: Optional[str] = None,
+        file_name: Optional[str] = None,
+        first_line: Optional[int] = None,
+    ) -> str:
+        if entity_name is None:
+            return "Please make sure to supply an entity name as an input to this tool"
+
         entity_name = entity_name.replace("()", "")
 
         if (entity_name, file_name) in self.requested_tags:
@@ -56,7 +68,12 @@ class GetFullTextTool(MotleyTool):
             return f"Definition of entity {entity_name}  not found in the repo"
         elif len(re_tags) == 1:
             return RenderCode.text_with_line_numbers(re_tags[0])
-        else:  # Can get multiple tags eg when requesting a whole file
+        else:
+            # Can get multiple tags eg when requesting a whole file
+            if isinstance(first_line, int):
+                sort = sorted(re_tags, key=lambda x: abs(x.line - first_line))
+                return RenderCode.text_with_line_numbers(sort[0])
+
             return """Your query matches more than one entity, see the summary of the matches below.
             Please refine your query to match only one entity.
             """ + tag_graph.code_renderer.to_tree(

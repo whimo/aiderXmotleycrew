@@ -40,16 +40,15 @@ class InspectEntityTool(MotleyTool):
         langchain_tool = StructuredTool.from_function(
             func=self.get_object_summary,
             name="inspect_entity",
-            description=""""Get the code of the entity with a given name (if that's not too long), 
+            description=""""Get the code of the entity with a given name, 
             including summary of the entities it references. Valid entities 
-            are function names, class names, method names prefixed with class, like `Foo.bar`. 
-            You can restrict your search to specific files by supplying the file_name argument,
-            but ONLY supply the file name/relative path if you need it to disambiguate the entity name,
+            are function names, class names, method names (prefix them by method name to disambiguate, like "Foo.bar")
+            
+            ONLY supply the file name/relative path if you need it to disambiguate the entity name,
             or if you want to inspect a whole file; in all other cases, just supply the entity name.
             You can also supply a partial file or directory name to get all files whose relative paths
             contain the partial name you supply.
             You can also request a whole file by name by omitting the entity name.
-            You MUST supply at least one of entity_name or file_name.
             """,
             args_schema=InspectObjectToolInput,
         )
@@ -58,6 +57,9 @@ class InspectEntityTool(MotleyTool):
     def get_object_summary(
         self, entity_name: Optional[str] = None, file_name: Optional[str] = None
     ) -> str:
+        if entity_name is None and file_name is None:
+            return "Please supply either the file name or the entity name"
+
         if entity_name is not None:
             entity_name = entity_name.replace("()", "")
 
@@ -68,20 +70,27 @@ class InspectEntityTool(MotleyTool):
 
         tag_graph = self.repo_map.get_tag_graph()
 
+        out = ""
+
         # TODO: if file_name is a directory, just list the files in it?
         re_tags = tag_graph.get_tags_from_entity_name(entity_name, file_name)
+        if not len(re_tags) and entity_name is not None and "." in entity_name:
+            entity_name_short = entity_name.split(".")[-1]
+            out += f"Entity {entity_name} not found, searching for {entity_name_short}...\n"
+            re_tags = tag_graph.get_tags_from_entity_name(entity_name_short, file_name)
 
         if not re_tags:  # maybe it was an explicit import?
             if entity_name is not None:
-                out = f"Definition of entity {entity_name} not found in the repo"
+                out += f"Definition of entity {entity_name} not found in the repo"
                 if file_name is None or self.to_dir(file_name) is None:
                     return out  # Absolutely no directories to work with
                 else:
                     candidate_dirs = [self.to_dir(file_name)]
             else:
                 return f"File {file_name} not found in the repo"
+
         elif len(re_tags) == 1:
-            out = tag_graph.get_tag_representation(
+            out += tag_graph.get_tag_representation(
                 re_tags[0], parent_details=True, max_lines=self.max_lines_long
             )
             candidate_dirs = [self.to_dir(re_tags[0].fname)]
@@ -96,9 +105,9 @@ class InspectEntityTool(MotleyTool):
                 ]
             )
             if len(repr.split("\n")) < self.max_lines_long:
-                out = repr
+                out += repr
             else:
-                out = tag_graph.code_renderer.to_tree(re_tags)
+                out += tag_graph.code_renderer.to_tree(re_tags)
 
             candidate_dirs = list(set([self.to_dir(t.fname) for t in re_tags]))
 
