@@ -12,6 +12,7 @@ def rank_tags_new(
     tag_graph: nx.MultiDiGraph,
     mentioned_fnames,
     mentioned_idents,
+    mentioned_entities,
     chat_fnames,
     other_rel_fnames,
     search_terms,
@@ -21,10 +22,16 @@ def rank_tags_new(
     for tag in G.nodes:
         G.nodes[tag]["weight"] = 0.0
 
+    mentioned_entities_clean = set([name.split(".")[-1] for name in mentioned_entities])
+
     # process mentioned_idents
     for tag in tag_graph.nodes:
-        if tag.kind == "def" and tag.name in mentioned_idents:
-            G.nodes[tag]["weight"] += 1.0
+        if tag.kind == "def":
+            if tag.fname in chat_fnames and tag.name in mentioned_entities_clean:
+                G.nodes[tag]["weight"] += 3.0
+
+            elif tag.name in mentioned_idents:
+                G.nodes[tag]["weight"] += 1.0
 
     # process mentioned_fnames
     mentioned_weights = weights_from_fnames(tag_graph, mentioned_fnames)

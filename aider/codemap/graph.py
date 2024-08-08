@@ -107,7 +107,12 @@ class TagGraph(nx.MultiDiGraph):
 
         return predecessors + [parent]
 
-    def get_tag_representation(self, tag: Tag, parent_details: bool = False, max_lines=200) -> str:
+    def get_tag_representation(
+            self,
+            tag: Tag,
+            parent_details: bool = False,
+            max_lines=200,
+            force_include_full_text=False) -> str:
         if tag is None:
             return None
         if tag not in self.nodes:
@@ -129,7 +134,9 @@ class TagGraph(nx.MultiDiGraph):
         tag_repr.append(RenderCode.text_with_line_numbers(tag))
         tag_repr = "\n".join(tag_repr)
 
-        if len(tag_repr.split("\n")) <= max_lines:
+        n_lines = len(tag_repr.split("\n"))
+
+        if force_include_full_text or n_lines <= max_lines:
             # if the full text hast at most 200 lines, put it all in the summary
             children = []
             for e, c, data in self.out_edges(tag, data=True):
@@ -145,12 +152,14 @@ class TagGraph(nx.MultiDiGraph):
 
             out = [tag_repr]
             if children:
-                out.extend(
-                    [
-                        "Referenced entities summary:",
-                        self.code_renderer.to_tree(children),
-                    ]
-                )
+                chlidren_summary = self.code_renderer.to_tree(children)
+                if n_lines + len(chlidren_summary.split("\n")) < max_lines:
+                    out.extend(
+                        [
+                            "Referenced entities summary:",
+                            self.code_renderer.to_tree(children),
+                        ]
+                    )
             return "\n".join(out)
         else:
             # if the full text is too long, send a summary of it and its children

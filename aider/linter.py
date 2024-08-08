@@ -97,7 +97,7 @@ class Linter:
         if not linkres:
             return
 
-        res = "# Fix any errors below, if possible.\n\n"
+        res = "# Edits applied. Now, fix any errors below, if possible.\n\n"
         res += linkres.text
         res += "\n"
         res += tree_context(rel_fname, code, linkres.lines)

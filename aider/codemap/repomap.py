@@ -74,6 +74,7 @@ class RepoMap:
         other_files,
         mentioned_fnames=None,
         mentioned_idents=None,
+        mentioned_entities=None,
         add_prefix: bool = True,
         search_terms: Set[str] | None = None,
     ):
@@ -85,6 +86,8 @@ class RepoMap:
             mentioned_fnames = set()
         if not mentioned_idents:
             mentioned_idents = set()
+        if not mentioned_entities:
+            mentioned_entities = set()
 
         # With no files in the chat, give a bigger view of the entire repo
         MUL = 16
@@ -103,6 +106,7 @@ class RepoMap:
                 self.max_map_tokens,
                 mentioned_fnames,
                 mentioned_idents,
+                mentioned_entities,
                 search_terms,
             )
         except RecursionError:
@@ -159,7 +163,7 @@ class RepoMap:
         return self.file_group.cached_function_call(fname, get_tags_raw_function)
 
     def get_ranked_tags(
-        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
+        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, mentioned_entities, search_terms
     ):
 
         # Check file names for validity
@@ -195,6 +199,7 @@ class RepoMap:
                 tag_graph,
                 mentioned_fnames,
                 mentioned_idents,
+                mentioned_entities,
                 chat_fnames,
                 other_rel_fnames,
                 search_terms,
@@ -209,6 +214,7 @@ class RepoMap:
         max_map_tokens=None,
         mentioned_fnames=None,
         mentioned_idents=None,
+        mentioned_entities=None,
         search_terms=None,
     ):
         """
@@ -229,11 +235,13 @@ class RepoMap:
             mentioned_fnames = set()
         if not mentioned_idents:
             mentioned_idents = set()
+        if not mentioned_entities:
+            mentioned_entities = set()
         if not search_terms:
             search_terms = set()
 
         ranked_tags = self.get_ranked_tags(
-            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, search_terms
+            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, mentioned_entities, search_terms
         )
 
         num_tags = len(ranked_tags)
@@ -274,6 +282,7 @@ class RepoMap:
         message: str,
         abs_added_fnames: Set[str] | None = None,
         rel_added_fnames: Set[str] | None = None,
+        mentioned_entities: Set[str] | None = None,
         add_prefix: bool = False,
         llm=None,
     ) -> str:
@@ -308,6 +317,7 @@ class RepoMap:
             other_files,
             mentioned_fnames=mentioned_fnames,
             mentioned_idents=mentioned_idents,
+            mentioned_entities=mentioned_entities,
             add_prefix=add_prefix,
             search_terms=search_terms,
         )

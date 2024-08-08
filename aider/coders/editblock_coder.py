@@ -101,7 +101,9 @@ def prep(content):
     if content and not content.endswith("\n"):
         content += "\n"
     lines = content.splitlines(keepends=True)
-    return content, lines
+
+    lines_without_numbers = [re.sub(r'^\d+\s*│', '', line) for line in lines]
+    return content, lines_without_numbers
 
 
 def perfect_or_whitespace(whole_lines, part_lines, replace_lines):
@@ -239,7 +241,10 @@ def replace_part_with_missing_leading_whitespace(whole_lines, part_lines, replac
         if add_leading is None:
             continue
 
-        replace_lines = [add_leading + rline if rline.strip() else rline for rline in replace_lines]
+        first_line_add, tail_lines_add = add_leading
+
+        replace_lines = ([first_line_add + replace_lines[0]] +
+                         [tail_lines_add + rline if rline.strip() else rline for rline in replace_lines[1:]])
         whole_lines = whole_lines[:i] + replace_lines + whole_lines[i + num_part_lines :]
         return "".join(whole_lines)
 
@@ -253,17 +258,20 @@ def match_but_for_leading_whitespace(whole_lines, part_lines):
     if not all(whole_lines[i].lstrip() == part_lines[i].lstrip() for i in range(num)):
         return
 
+    # compute the offset of the first line independently
+    first_line_add = whole_lines[0][: len(whole_lines[0]) - len(part_lines[0])]
+
     # are they all offset the same?
     add = set(
         whole_lines[i][: len(whole_lines[i]) - len(part_lines[i])]
-        for i in range(num)
+        for i in range(1, num)
         if whole_lines[i].strip()
     )
 
     if len(add) != 1:
         return
 
-    return add.pop()
+    return first_line_add, add.pop()
 
 
 def replace_closest_edit_distance(whole_lines, part, part_lines, replace_lines):
