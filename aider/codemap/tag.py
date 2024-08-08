@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class Tag:
     rel_fname: str
     line: int
+    end_line: int
     name: str
     kind: str
     docstring: str

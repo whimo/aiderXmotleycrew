@@ -63,10 +63,10 @@ class InspectEntityTool(MotleyTool):
         if entity_name is not None:
             entity_name = entity_name.replace("()", "")
 
-        if (entity_name, file_name) in self.requested_tags:
-            return "You've already requested that one!"
-        else:
-            self.requested_tags.add((entity_name, file_name))
+        # if (entity_name, file_name) in self.requested_tags:
+        #     return "You've already requested that one!"
+        # else:
+        #     self.requested_tags.add((entity_name, file_name))
 
         tag_graph = self.repo_map.get_tag_graph()
 
@@ -91,7 +91,10 @@ class InspectEntityTool(MotleyTool):
 
         elif len(re_tags) == 1:
             out += tag_graph.get_tag_representation(
-                re_tags[0], parent_details=True, max_lines=self.max_lines_long, force_include_full_text=True
+                re_tags[0],
+                parent_details=True,
+                max_lines=self.max_lines_long,
+                force_include_full_text=True,
             )
             candidate_dirs = [self.to_dir(re_tags[0].fname)]
         else:  # Can get multiple tags eg when requesting a whole file

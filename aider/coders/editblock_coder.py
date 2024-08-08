@@ -102,7 +102,7 @@ def prep(content):
         content += "\n"
     lines = content.splitlines(keepends=True)
 
-    lines_without_numbers = [re.sub(r'^\d+\s*│', '', line) for line in lines]
+    lines_without_numbers = [re.sub(r"^\d+\s*│", "", line) for line in lines]
     return content, lines_without_numbers
 
 
@@ -243,8 +243,9 @@ def replace_part_with_missing_leading_whitespace(whole_lines, part_lines, replac
 
         first_line_add, tail_lines_add = add_leading
 
-        replace_lines = ([first_line_add + replace_lines[0]] +
-                         [tail_lines_add + rline if rline.strip() else rline for rline in replace_lines[1:]])
+        replace_lines = [first_line_add + replace_lines[0]] + [
+            tail_lines_add + rline if rline.strip() else rline for rline in replace_lines[1:]
+        ]
         whole_lines = whole_lines[:i] + replace_lines + whole_lines[i + num_part_lines :]
         return "".join(whole_lines)
 
@@ -268,10 +269,10 @@ def match_but_for_leading_whitespace(whole_lines, part_lines):
         if whole_lines[i].strip()
     )
 
-    if len(add) != 1:
+    if len(add) > 1:
         return
 
-    return first_line_add, add.pop()
+    return first_line_add, add.pop() if add else 0
 
 
 def replace_closest_edit_distance(whole_lines, part, part_lines, replace_lines):
