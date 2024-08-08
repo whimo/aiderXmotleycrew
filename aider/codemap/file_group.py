@@ -164,6 +164,18 @@ class FileGroup:
 
         return mentioned_rel_fnames
 
+    def get_rel_fnames_in_directory(self, abs_dir: str) -> List[str] | None:
+        abs_dir = abs_dir.replace("\\", "/").rstrip("/")
+        all_abs_files = self.get_all_filenames()
+        # List all of the above files that are in abs_dir, but not in subdirectories of abs_dir
+        matches = [
+            f
+            for f in all_abs_files
+            if f.startswith(abs_dir) and f.count("/") == abs_dir.count("/") + 1
+        ]
+        rel_matches = [str(self.get_rel_fname(f)) for f in matches]
+        return rel_matches
+
 
 def get_ident_filename_matches(idents, all_rel_fnames: List[str], max_ident_len=2):
     all_fnames = defaultdict(set)

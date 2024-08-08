@@ -1,6 +1,6 @@
 from tree_sitter_languages import get_language, get_parser
 from grep_ast import filename_to_lang
-from aider.codemap.parse import get_query, tree_to_tags
+from aider.codemap.parse import get_query, ast_to_tags
 from aider.codemap.graph import build_tag_graph
 
 lang = filename_to_lang("dummy.py")
@@ -43,7 +43,7 @@ class B(BaseModel):
     )
 )
 query = get_query(lang)
-tags = tree_to_tags(tree, query, "dummy.py", "dummy.py")
+tags = ast_to_tags(tree, query, "dummy.py", "dummy.py")
 graph = build_tag_graph(tags)
 
 import matplotlib.pyplot as plt

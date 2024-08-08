@@ -48,6 +48,7 @@ class RepoMap:
         max_context_window=None,
         file_group: FileGroup = None,
         use_old_ranking: bool = False,
+        cache_graphs: bool = False
     ):
         self.io = io
         self.verbose = verbose
@@ -65,8 +66,8 @@ class RepoMap:
         self.token_count = main_model.token_count
         self.repo_content_prefix = repo_content_prefix
         self.file_group = file_group
-        self.code_renderer = RenderCode(text_encoding=self.io.encoding)
-        self.tag_graphs = {}
+        self.code_renderer = RenderCode()
+        self.tag_graphs = {} if cache_graphs else None
 
     def get_repo_map(
         self,
@@ -140,14 +141,21 @@ class RepoMap:
             abs_fnames = self.file_group.get_all_filenames()
         clean_fnames = self.file_group.validate_fnames(abs_fnames)
 
-        for files, graph in self.tag_graphs.items():
-            if not set(clean_fnames).difference(set(files)):
-                return graph
-
-        tags = sum([self.tags_from_filename(fname) for fname in clean_fnames], [])
-        raw_graph = build_tag_graph(tags, self.code_renderer.encoding)
+        if self.tag_graphs is not None:
+            for files, graph in self.tag_graphs.items():
+                if not set(clean_fnames).difference(set(files)):
+                    return graph
+        # If no caching or cached graph not found, construct it
+        all_tags = []
+        code_map = {}
+        for fname in clean_fnames:
+            code, tags = self.tags_from_filename(fname)
+            all_tags += tags
+            code_map[fname] = code
+        raw_graph = build_tag_graph(all_tags, code_map)
         graph = only_defs(raw_graph)
-        self.tag_graphs[tuple(clean_fnames)] = graph
+        if self.tag_graphs is not None:
+            self.tag_graphs[tuple(clean_fnames)] = graph
         return graph
 
     def tags_from_filename(self, fname):
@@ -156,7 +164,7 @@ class RepoMap:
             rel_fname = self.file_group.get_rel_fname(fname)
             data = get_tags_raw(fname, rel_fname, code)
             assert isinstance(data, list)
-            return data
+            return code, data
 
         # return get_tags_raw_function(fname)
         # # TODO: resume caching
@@ -187,6 +195,8 @@ class RepoMap:
 
         # All the source code parsing happens here
         tag_graph = self.get_tag_graph(cleaned)
+        self.code_renderer.code_map = tag_graph.code_renderer.code_map
+
         tags = list(tag_graph.nodes)
 
         other_rel_fnames = [self.file_group.get_rel_fname(fname) for fname in other_fnames]

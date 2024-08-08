@@ -7,6 +7,7 @@ class Tag:
     line: int
     name: str
     kind: str
+    docstring: str
     fname: str
     text: str
     byte_range: tuple[int, int]
@@ -27,6 +28,7 @@ class Tag:
             self.line,
             self.name,
             self.kind,
+            self.docstring,
             self.fname,
             self.text,
             self.byte_range,
