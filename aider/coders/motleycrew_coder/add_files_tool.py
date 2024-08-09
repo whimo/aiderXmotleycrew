@@ -41,6 +41,7 @@ class AddFilesTool(MotleyTool):
         for file in files:
             abs_filename = self.file_group.abs_root_path(file)
             logger.info(f"Trying to add to the list of modifiable files: {abs_filename}")
+
             content = self.read_text_file(abs_filename)
             if content is None:
                 logger.error(f"Error reading {abs_filename}, skipping it.")
@@ -54,7 +55,7 @@ class AddFilesTool(MotleyTool):
         else:
             return (
                 f"Added the following files to the list of modifiable files: {', '.join(added_files)}, "
-                f"please use the Inspect_Entity tool to inspect them."
+                f"please use the `inspect_entity` tool to inspect them."
             )
 
     # Should be using the inspect_object_tool instead
@@ -89,7 +90,6 @@ class AddFilesTool(MotleyTool):
                 return f.read()
         except FileNotFoundError:
             logger.error(f"{filename}: file not found error")
-            return
         except IsADirectoryError:
             logger.error(f"{filename}: is a directory")
             return

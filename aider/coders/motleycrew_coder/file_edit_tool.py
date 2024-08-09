@@ -50,10 +50,19 @@ class FileEditTool(MotleyTool):
         if not replace or replace[-1] != "\n":
             replace += "\n"
 
+        logger.info(
+            f"""Trying to edit file {file_path}
+<<<<<<< SEARCH
+{search}=======
+{replace}>>>>>>> REPLACE
+"""
+        )
+
         abs_path = self.coder.abs_root_path(file_path)
         if abs_path not in self.coder.abs_fnames:
-            return f"""Cannot edit {file_path} yet. You need to add it to the list
-            of editable files using the Add_files_to_be_modified tool first."""
+            # return f"""Cannot edit {file_path} yet. You need to add it to the list
+            # of editable files using the Add_files_to_be_modified tool first."""
+            self.coder.add_rel_fname(file_path)
 
         # here it checks for all sorts of other possible issues
         allowed_to_edit = self.coder.allowed_to_edit(file_path)
@@ -96,4 +105,6 @@ class FileEditTool(MotleyTool):
         if self.coder.dry_run:
             return f"Did not apply edit to {file_path} (--dry-run)"
         else:
-            return f"Applied edit to {file_path}"
+            return f"""The file {file_path} has been successfully edited.
+If you are finished, call the tool `return_to_user` to apply the changes and inform the user that you have finished.
+"""

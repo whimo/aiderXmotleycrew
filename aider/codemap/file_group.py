@@ -11,7 +11,7 @@ from diskcache import Cache
 
 
 def python_file_filter(fname: str) -> bool:
-    return fname.endswith(".py") and not "test_" in fname
+    return fname.endswith(".py")  # and not "test_" in fname
 
 
 class FileGroup:

@@ -12,43 +12,242 @@ from aider.codemap.render import RenderCode
 builtins_by_lang = {
     "python": {
         # Built-in functions
-        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes", "callable",
-        "chr", "classmethod", "compile", "complex", "delattr", "dict", "dir", "divmod",
-        "enumerate", "eval", "exec", "filter", "float", "format", "frozenset", "getattr",
-        "globals", "hasattr", "hash", "help", "hex", "id", "input", "int", "isinstance",
-        "issubclass", "iter", "len", "list", "locals", "map", "max", "memoryview", "min",
-        "next", "object", "oct", "open", "ord", "pow", "print", "property", "range",
-        "repr", "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod",
-        "str", "sum", "super", "tuple", "type", "vars", "zip",
+        "abs",
+        "all",
+        "any",
+        "ascii",
+        "bin",
+        "bool",
+        "bytearray",
+        "bytes",
+        "callable",
+        "chr",
+        "classmethod",
+        "compile",
+        "complex",
+        "delattr",
+        "dict",
+        "dir",
+        "divmod",
+        "enumerate",
+        "eval",
+        "exec",
+        "filter",
+        "float",
+        "format",
+        "frozenset",
+        "getattr",
+        "globals",
+        "hasattr",
+        "hash",
+        "help",
+        "hex",
+        "id",
+        "input",
+        "int",
+        "isinstance",
+        "issubclass",
+        "iter",
+        "len",
+        "list",
+        "locals",
+        "map",
+        "max",
+        "memoryview",
+        "min",
+        "next",
+        "object",
+        "oct",
+        "open",
+        "ord",
+        "pow",
+        "print",
+        "property",
+        "range",
+        "repr",
+        "reversed",
+        "round",
+        "set",
+        "setattr",
+        "slice",
+        "sorted",
+        "staticmethod",
+        "str",
+        "sum",
+        "super",
+        "tuple",
+        "type",
+        "vars",
+        "zip",
         # Reserved keywords
-        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
-        "continue", "def", "del", "elif", "else", "except", "finally", "for", "from",
-        "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
-        "raise", "return", "try", "while", "with", "yield",
+        "False",
+        "None",
+        "True",
+        "and",
+        "as",
+        "assert",
+        "async",
+        "await",
+        "break",
+        "class",
+        "continue",
+        "def",
+        "del",
+        "elif",
+        "else",
+        "except",
+        "finally",
+        "for",
+        "from",
+        "global",
+        "if",
+        "import",
+        "in",
+        "is",
+        "lambda",
+        "nonlocal",
+        "not",
+        "or",
+        "pass",
+        "raise",
+        "return",
+        "try",
+        "while",
+        "with",
+        "yield",
         # Magic methods
-        "__abs__", "__add__", "__and__", "__bool__", "__bytes__", "__call__", "__ceil__",
-        "__cmp__", "__coerce__", "__complex__", "__contains__", "__del__", "__delattr__",
-        "__delete__", "__delitem__", "__delslice__", "__dir__", "__div__", "__divmod__",
-        "__enter__", "__eq__", "__exit__", "__float__", "__floor__", "__floordiv__",
-        "__ge__", "__get__", "__getattr__", "__getattribute__", "__getitem__", "__getslice__",
-        "__gt__", "__hash__", "__iadd__", "__iand__", "__ifloordiv__", "__ilshift__",
-        "__imod__", "__import__", "__imul__", "__index__", "__init__", "__instancecheck__",
-        "__int__", "__invert__", "__ior__", "__ipow__", "__irshift__", "__isub__",
-        "__iter__", "__itruediv__", "__ixor__", "__le__", "__len__", "__long__", "__lshift__",
-        "__lt__", "__mod__", "__mul__", "__ne__", "__neg__", "__new__", "__nonzero__",
-        "__oct__", "__or__", "__pos__", "__pow__", "__radd__", "__rand__", "__rdiv__",
-        "__rdivmod__", "__repr__", "__reversed__", "__rfloordiv__", "__rlshift__",
-        "__rmod__", "__rmul__", "__ror__", "__round__", "__rpow__", "__rrshift__",
-        "__rshift__", "__rsub__", "__rtruediv__", "__rxor__", "__set__", "__setattr__",
-        "__setitem__", "__setslice__", "__str__", "__sub__", "__truediv__", "__xor__",
-        "__subclasscheck__", "__subclasses__", "__format__", "__sizeof__", "__dir__",
-        "__class__", "__doc__", "__enter__", "__exit__", "__annotations__", "__kwdefaults__",
-        "__code__", "__defaults__", "__globals__", "__closure__", "__doc__", "__name__",
-        "__qualname__", "__module__", "__defaults__", "__kwdefaults__", "__code__",
-        "__globals__", "__closure__", "__get__", "__set__", "__delete__", "__slots__",
-        "__weakref__", "__dict__", "__bases__", "__class__", "__mro__", "__subclasses__",
-        "__init_subclass__", "__prepare__", "__instancecheck__", "__subclasscheck__",
-        "__class_getitem__"
+        "__abs__",
+        "__add__",
+        "__and__",
+        "__bool__",
+        "__bytes__",
+        "__call__",
+        "__ceil__",
+        "__cmp__",
+        "__coerce__",
+        "__complex__",
+        "__contains__",
+        "__del__",
+        "__delattr__",
+        "__delete__",
+        "__delitem__",
+        "__delslice__",
+        "__dir__",
+        "__div__",
+        "__divmod__",
+        "__enter__",
+        "__eq__",
+        "__exit__",
+        "__float__",
+        "__floor__",
+        "__floordiv__",
+        "__ge__",
+        "__get__",
+        "__getattr__",
+        "__getattribute__",
+        "__getitem__",
+        "__getslice__",
+        "__gt__",
+        "__hash__",
+        "__iadd__",
+        "__iand__",
+        "__ifloordiv__",
+        "__ilshift__",
+        "__imod__",
+        "__import__",
+        "__imul__",
+        "__index__",
+        "__init__",
+        "__instancecheck__",
+        "__int__",
+        "__invert__",
+        "__ior__",
+        "__ipow__",
+        "__irshift__",
+        "__isub__",
+        "__iter__",
+        "__itruediv__",
+        "__ixor__",
+        "__le__",
+        "__len__",
+        "__long__",
+        "__lshift__",
+        "__lt__",
+        "__mod__",
+        "__mul__",
+        "__ne__",
+        "__neg__",
+        "__new__",
+        "__nonzero__",
+        "__oct__",
+        "__or__",
+        "__pos__",
+        "__pow__",
+        "__radd__",
+        "__rand__",
+        "__rdiv__",
+        "__rdivmod__",
+        "__repr__",
+        "__reversed__",
+        "__rfloordiv__",
+        "__rlshift__",
+        "__rmod__",
+        "__rmul__",
+        "__ror__",
+        "__round__",
+        "__rpow__",
+        "__rrshift__",
+        "__rshift__",
+        "__rsub__",
+        "__rtruediv__",
+        "__rxor__",
+        "__set__",
+        "__setattr__",
+        "__setitem__",
+        "__setslice__",
+        "__str__",
+        "__sub__",
+        "__truediv__",
+        "__xor__",
+        "__subclasscheck__",
+        "__subclasses__",
+        "__format__",
+        "__sizeof__",
+        "__dir__",
+        "__class__",
+        "__doc__",
+        "__enter__",
+        "__exit__",
+        "__annotations__",
+        "__kwdefaults__",
+        "__code__",
+        "__defaults__",
+        "__globals__",
+        "__closure__",
+        "__doc__",
+        "__name__",
+        "__qualname__",
+        "__module__",
+        "__defaults__",
+        "__kwdefaults__",
+        "__code__",
+        "__globals__",
+        "__closure__",
+        "__get__",
+        "__set__",
+        "__delete__",
+        "__slots__",
+        "__weakref__",
+        "__dict__",
+        "__bases__",
+        "__class__",
+        "__mro__",
+        "__subclasses__",
+        "__init_subclass__",
+        "__prepare__",
+        "__instancecheck__",
+        "__subclasscheck__",
+        "__class_getitem__",
     }
 }
 
@@ -108,11 +307,8 @@ class TagGraph(nx.MultiDiGraph):
         return predecessors + [parent]
 
     def get_tag_representation(
-            self,
-            tag: Tag,
-            parent_details: bool = False,
-            max_lines=200,
-            force_include_full_text=False) -> str:
+        self, tag: Tag, parent_details: bool = False, max_lines=200, force_include_full_text=False
+    ) -> str:
         if tag is None:
             return None
         if tag not in self.nodes:
@@ -163,9 +359,12 @@ class TagGraph(nx.MultiDiGraph):
             return "\n".join(out)
         else:
             # if the full text is too long, send a summary of it and its children
-            children = list(self.successors_with_attribute(tag, attr_name="include_in_summary", attr_value=True))
-            tag_repr = self.code_renderer.to_tree([tag] + [c for c in children
-                                                           if c.name not in builtins_by_lang.get(c.language, [])])
+            children = list(
+                self.successors_with_attribute(tag, attr_name="include_in_summary", attr_value=True)
+            )
+            tag_repr = self.code_renderer.to_tree(
+                [tag] + [c for c in children if c.name not in builtins_by_lang.get(c.language, [])]
+            )
             return tag_repr
 
     def get_tag_from_filename_lineno(
@@ -195,12 +394,13 @@ class TagGraph(nx.MultiDiGraph):
             assert file_name is not None, "Must supply at least one of entity_name, file_name"
             return [t for t in self.nodes if file_name in t.fname]
 
+        min_entity_name = entity_name.split(".")[-1]
+
         # Composite, like `file.py:method_name`
         if file_name is not None:
             preselection: List[Tag] = [t for t in self.nodes if file_name in t.fname]
-            test = [
-                t for t in preselection if t.name == entity_name.split(".")[-1] and t.kind == "def"
-            ]
+
+            test = [t for t in preselection if t.name == min_entity_name and t.kind == "def"]
             if not test:
                 logger.warning(
                     f"Definition of entity {entity_name} not found in file {file_name}, searching globally"
@@ -210,7 +410,7 @@ class TagGraph(nx.MultiDiGraph):
             preselection: List[Tag] = list(self.nodes)
 
         orig_tags: List[Tag] = [
-            t for t in preselection if t.name == entity_name.split(".")[-1] and t.kind == "def"
+            t for t in preselection if t.name == min_entity_name and t.kind == "def"
         ]
 
         # do fancier name resolution
@@ -336,7 +536,9 @@ def only_defs(tag_graph: TagGraph) -> TagGraph:
         if u.kind == "def" and v.kind != "def":
             for _, v_desc in tag_graph.out_edges(v):
                 if v_desc.kind == "def":
-                    data["include_in_summary"] = (v.n_defs <= 2)  # Skip entries with more than 2 definition candidates
+                    data["include_in_summary"] = (
+                        v.n_defs <= 2
+                    )  # Skip entries with more than 2 definition candidates
                     G.add_edge(u, v_desc, **data)
     return G
 
