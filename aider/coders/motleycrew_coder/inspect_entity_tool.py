@@ -1,19 +1,15 @@
 import os.path
+from typing import Optional
 from typing import TYPE_CHECKING
 
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.tools import StructuredTool
-from typing import List, Optional
-
-from motleycrew.common import logger
-from motleycrew.tools import MotleyTool
 
 from aider.codemap.repomap import RepoMap
-from aider.codemap.render import RenderCode
-from aider.codemap.tag import Tag
+from motleycrew.tools import MotleyTool
 
 if TYPE_CHECKING:
-    from .motleycrew_coder import MotleyCrewCoder
+    pass
 
 
 class InspectObjectToolInput(BaseModel):
@@ -68,7 +64,7 @@ class InspectEntityTool(MotleyTool):
         # else:
         #     self.requested_tags.add((entity_name, file_name))
 
-        tag_graph = self.repo_map.get_tag_graph()
+        tag_graph = self.repo_map.get_tag_graph(with_tests=True)
 
         out = ""
 

@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.tools import StructuredTool
 
-from aider.utils import is_image_file
 from motleycrew.common import logger
 from motleycrew.tools import MotleyTool
 

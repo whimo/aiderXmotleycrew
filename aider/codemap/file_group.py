@@ -1,17 +1,18 @@
+import logging
 import os
 import os.path
-import logging
-from pathlib import Path
-from typing import Callable, List
 import re
 from collections import defaultdict
+from pathlib import Path
+from typing import Callable, List
 
-from aider.repo import GitRepo
 from diskcache import Cache
 
+from aider.repo import GitRepo
 
-def python_file_filter(fname: str) -> bool:
-    return fname.endswith(".py")  # and not "test_" in fname
+
+def python_file_filter(fname: str, with_tests: bool = False) -> bool:
+    return fname.endswith(".py") and (with_tests or not "test_" in fname)
 
 
 class FileGroup:
@@ -66,10 +67,10 @@ class FileGroup:
 
         return sorted(set(files))
 
-    def validate_fnames(self, fnames: List[str]) -> List[str]:
+    def validate_fnames(self, fnames: List[str], with_tests: bool = False) -> List[str]:
         cleaned_fnames = []
         for fname in fnames:
-            if not self.filename_filter(str(fname)):
+            if not self.filename_filter(str(fname), with_tests=with_tests):
                 continue
             if Path(fname).is_file():
                 cleaned_fnames.append(str(fname))

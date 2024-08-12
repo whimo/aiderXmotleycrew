@@ -3,25 +3,21 @@ import os
 import random
 import sys
 import warnings
+from pathlib import Path
 from typing import List, Set
 
-from pathlib import Path
-
-import networkx as nx
+from langchain_core.pydantic_v1 import BaseModel, Field
 from tqdm import tqdm
 
-from langchain_core.pydantic_v1 import BaseModel, Field
-
-from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
-from aider.codemap.tag import Tag
-from aider.codemap.graph import TagGraph, build_tag_graph, only_defs  # noqa: F402
-from aider.codemap.rank import rank_tags_new, rank_tags  # noqa: F402
 from aider.codemap.file_group import (
     FileGroup,
     find_src_files,
     get_ident_mentions,
     get_ident_filename_matches,
 )
+from aider.codemap.graph import TagGraph, build_tag_graph, only_defs  # noqa: F402
+from aider.codemap.parse import get_tags_raw, read_text  # noqa: F402
+from aider.codemap.rank import rank_tags_new, rank_tags  # noqa: F402
 from aider.codemap.render import RenderCode
 from aider.dump import dump  # noqa: F402,E402
 
@@ -48,7 +44,7 @@ class RepoMap:
         max_context_window=None,
         file_group: FileGroup = None,
         use_old_ranking: bool = False,
-        cache_graphs: bool = False
+        cache_graphs: bool = False,
     ):
         self.io = io
         self.verbose = verbose
@@ -136,13 +132,15 @@ class RepoMap:
 
         return repo_content
 
-    def get_tag_graph(self, abs_fnames: List[str] | None = None) -> TagGraph:
+    def get_tag_graph(
+        self, abs_fnames: List[str] | None = None, with_tests: bool = False
+    ) -> TagGraph:
         if not abs_fnames:
             abs_fnames = self.file_group.get_all_filenames()
-        clean_fnames = self.file_group.validate_fnames(abs_fnames)
+        clean_fnames = self.file_group.validate_fnames(abs_fnames, with_tests=with_tests)
 
         if self.tag_graphs is not None:
-            for files, graph in self.tag_graphs.items():
+            for files, graph in sorted(list(self.tag_graphs.items()), key=lambda kv: len(kv[0])):
                 if not set(clean_fnames).difference(set(files)):
                     return graph
         # If no caching or cached graph not found, construct it
@@ -171,7 +169,13 @@ class RepoMap:
         return self.file_group.cached_function_call(fname, get_tags_raw_function)
 
     def get_ranked_tags(
-        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, mentioned_entities, search_terms
+        self,
+        chat_fnames,
+        other_fnames,
+        mentioned_fnames,
+        mentioned_idents,
+        mentioned_entities,
+        search_terms,
     ):
 
         # Check file names for validity
@@ -251,7 +255,12 @@ class RepoMap:
             search_terms = set()
 
         ranked_tags = self.get_ranked_tags(
-            chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, mentioned_entities, search_terms
+            chat_fnames,
+            other_fnames,
+            mentioned_fnames,
+            mentioned_idents,
+            mentioned_entities,
+            search_terms,
         )
 
         num_tags = len(ranked_tags)

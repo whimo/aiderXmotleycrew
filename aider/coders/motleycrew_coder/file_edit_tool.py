@@ -37,11 +37,13 @@ class FileEditTool(MotleyTool):
         error_message = self.edit_file_inner(file_path, search, replace)
         # TODO: num_reflections belongs in the calling agent, not in the tool!
         if error_message:
-            if self.coder.num_reflections < self.coder.max_reflections:
-                self.coder.num_reflections += 1
-                return error_message
-            else:
-                logger.warning(f"Only {self.coder.max_reflections} reflections allowed, stopping.")
+            return error_message
+            # if self.coder.num_reflections < self.coder.max_reflections:
+            #     self.coder.num_reflections += 1
+            #     return error_message
+            # else:
+            #     logger.warning(f"Only {self.coder.max_reflections} reflections allowed, stopping.")
+
         return self.coder.gpt_prompts.file_edit_success.format(file_path=file_path)
 
     def edit_file_inner(self, file_path: str, search: str, replace: str) -> str:
@@ -87,7 +89,7 @@ class FileEditTool(MotleyTool):
             return message
         except Exception as err:
             logger.warning("Exception while updating files:")
-            logger.warning(str(err), strip=False)
+            logger.warning(str(err))
 
             traceback.print_exc()
             return str(err)
